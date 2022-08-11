@@ -1,0 +1,6 @@
+# Dune output
+_build/
+
+# Wasmer library
+/src/bindings/dllwasmer.so
+/src/bindings/libwasmer.a

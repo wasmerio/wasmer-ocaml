@@ -1,0 +1,3 @@
+(executable
+ (name test_hello)
+ (libraries wasmer_ocaml))

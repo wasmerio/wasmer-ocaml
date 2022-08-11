@@ -1,0 +1,10 @@
+(library
+ (name wasmer_ocaml)
+ (public_name wasmer_ocaml)
+ (synopsis "OCaml bindings support for Wasmer")
+ (libraries ctypes ctypes.foreign)
+ (flags (:standard -w -32-33))
+ (library_flags (-ccopt -Wl,-whole-archive -ccopt -Wl,-allow-multiple-definition))
+
+ (foreign_stubs (language c) (names wasmerBindings))
+ (foreign_archives wasmer))
