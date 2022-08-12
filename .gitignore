@@ -19,7 +19,12 @@ obj/**/*.mli
 .depend
 
 # Test executables
+/test/instance/instance
 /test/hello/hello
 
 # Temp (WIP) files
 *.old
+
+# Development files
+.gdb_history
+.vscode

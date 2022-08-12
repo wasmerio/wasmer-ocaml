@@ -1,10 +1,10 @@
-(*open Ctypes;;*)
+open Ctypes;;
 open Wasmer_ocaml.WasmerBindings;;
+open Wasmer_ocaml.Util;;
 
 let () =
   print_endline "Initializing...";
   let eng = Engine.new_ () in
-ignore eng (*
   let sto = Store.new_ eng in
   print_endline "Loading binary...";
   let wasm =
@@ -13,7 +13,7 @@ ignore eng (*
       let flen = in_channel_length f in
       let b = Bytes.create flen in
       really_input f b 0 flen;
-      let ret = ByteVec.of_bytes b in
+      let ret = Byte.Vec.of_bytes b in
       close_in f; ret
     with e ->
       close_in_noerr f;
@@ -29,11 +29,10 @@ ignore eng (*
     if is_null real_module then
       (print_endline "> Error compiling module!"; failwith "Invalid module!")
     else begin
-      Byte_vec.delete wasm;
+      Byte.Vec.delete wasm;
       
       print_endline "Creating callback...";
       (* TODO *)
       print_endline "TODO"
     end
   end
-*)

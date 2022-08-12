@@ -57,7 +57,9 @@ module DECLARE_VEC(U: VectorType) = struct
     val delete: t structure ptr -> unit
     
     val make_empty: unit -> t structure ptr
+    val make_empty_null: unit -> t structure ptr
     val make_uninit: int -> t structure ptr
+    val of_carray: data_type carray -> t structure ptr
     val of_list: data_type list -> t structure ptr
     val duplicate: t structure ptr -> t structure ptr
   end
@@ -85,10 +87,19 @@ module DeclareVec(T: VectorType) : DECLARE_VEC(T).T = struct
   let delete = foreign ?stub:(Some true) (name ^ "_delete") (ptr t @-> returning void)
   
   let make_empty () = let ret = make () in new_empty ret; ret
+  let make_empty_null () =
+    let ret = make () in
+    ret |-> fsize <-@ Unsigned.Size_t.of_int 0;
+    ret |-> fdata <-@ from_voidp data_type null;
+    ret
   let make_uninit n =
     let ret = make () in new_uninitialized ret (Unsigned.Size_t.of_int n); ret
-  let of_list l =
-    let ret = make () in let arr = CArray.of_list data_type l in new_carray ret arr; ret
+  let of_carray a =
+    let ret = make () in
+    ret |-> fsize <-@ Unsigned.Size_t.of_int (CArray.length a);
+    ret |-> fdata <-@ CArray.start a;
+    ret
+  let of_list l = of_carray (CArray.of_list data_type l)
   let duplicate self =
     let cop = make () in
     copy cop self;
@@ -141,9 +152,23 @@ module DeclareRefBase(T: StructType) : DECLARE_REF_BASE = struct
   let set_host_info =
     foreign ?stub:(Some true) (name ^ "_set_host_info") (ptr t @-> ptr void @-> returning void)
   let set_host_info_with_finalizer =
-    foreign ?stub:(Some true)
+    let mem = ref [] in (* Finalizers may be GC'd if not stored here *)
+    let idx = ref 0 in
+    let f = foreign ?stub:(Some true)
       (name ^ "_set_host_info_with_finalizer")
-      (ptr t @-> ptr void @-> (funptr (ptr void @-> returning void)) @-> returning void)
+      (ptr t @-> ptr void @-> (funptr ~thread_registration:true (ptr void @-> returning void)) @-> returning void) in
+    fun r d cb -> (* Make sure the callback gets GC'd *)
+      let i = !idx in
+      let real_callback data =
+        cb data;
+        let rec remove_i l acc = match l with
+        | [] -> acc
+        | (j, v) :: tl ->
+          if j = i then List.rev_append tl acc
+          else remove_i tl ((j, v) :: acc) in
+        mem := remove_i !mem [] in
+      mem := (i, real_callback) :: !mem;
+      f r d real_callback
 end;;
 
 module Ref_T = struct let name = "ref" end;;
@@ -193,6 +218,9 @@ module Name = struct
   
   let of_string s = of_bytes (Bytes.of_string s)
 end;;
+module Message = struct
+  include Name
+end;;
 
 module Config_T = struct
   let name = "config"
@@ -239,8 +267,9 @@ module Limits = struct
   let min = field t "min" uint32_t
   let max = field t "max" uint32_t
   let () = seal t
+  
+  let max_default = 0xFFFFFFFF (* limits_max_default *)
 end;;
-let limits_max_default = 0xffffffff;;
 
 module Valkind = struct
   type valkind_OCaml =
@@ -558,8 +587,285 @@ module DeclareShareableRef(T: StructType) : DECLARE_SHAREABLE_REF = struct
 end;;
 
 
-(*
-(* Module, Extern, Trap *)
+module Frame_T = struct
+  let name = "frame"
+end
+module Frame = struct
+  include DeclareOwn(Frame_T)
+  module V = struct
+    type data_type = t structure ptr
+    let data_type = ptr t
+    let name = Frame_T.name
+  end
+  module Vec = DeclareVec(V)
+  let duplicate = foreign ?stub:(Some true) (name ^ "_copy") (ptr t @-> returning (ptr t))
+  
+  let instance = foreign ?stub:(Some true) (name ^ "_instance") (ptr t @-> returning (ptr void))
+  let func_index = foreign ?stub:(Some true) (name ^ "_func_index") (ptr t @-> returning uint32_t)
+  let func_offset = foreign ?stub:(Some true) (name ^ "_func_offset") (ptr t @-> returning size_t)
+  let module_offset = foreign ?stub:(Some true) (name ^ "_module_offset") (ptr t @-> returning size_t)
+end;;
+
+module Trap_T = struct
+  let name = "trap"
+end;;
+module Trap = struct
+  include DeclareRef(Trap_T)
+  
+  let new_ =
+    foreign ?stub:(Some true)
+      "wasm_trap_new"
+      (ptr Store.t @-> ptr Message.t @-> returning (ptr t))
+  
+  let message =
+    foreign ?stub:(Some true)
+      "wasm_trap_message"
+      (ptr t @-> ptr Message.t @-> returning void)
+  let origin =
+    foreign ?stub:(Some true)
+      "wasm_trap_origin"
+      (ptr t @-> returning (ptr Frame.t))
+  let trace =
+    foreign ?stub:(Some true)
+      "wasm_trap_trace"
+      (ptr t @-> ptr Frame.Vec.t @-> returning void)
+end;;
+
+module Foreign_T = struct
+  let name = "foreign"
+end;;
+module Foreign = struct
+  include DeclareRef(Foreign_T)
+  
+  let new_ =
+    foreign ?stub:(Some true)
+      "wasm_foreign_new"
+      (ptr Store.t @-> returning (ptr t))
+end;;
+
+module Module_T = struct
+  let name = "module"
+end;;
+module Module = struct
+  include DeclareShareableRef(Module_T)
+  
+  let new_ =
+    foreign ?stub:(Some true)
+      "wasm_module_new"
+      (ptr Store.t @-> ptr Byte.Vec.t @-> returning (ptr t))
+  
+  let validate =
+    foreign ?stub:(Some true)
+      "wasm_module_validate"
+      (ptr Store.t @-> ptr Byte.Vec.t @-> returning bool)
+  
+  let imports =
+    foreign ?stub:(Some true)
+      "wasm_module_imports"
+      (ptr t @-> ptr Importtype.Vec.t @-> returning void)
+  let exports =
+    foreign ?stub:(Some true)
+      "wasm_module_exports"
+      (ptr t @-> ptr Importtype.Vec.t @-> returning void)
+  
+  let serialize =
+    foreign ?stub:(Some true)
+      "wasm_module_serialize"
+      (ptr t @-> ptr Byte.Vec.t @-> returning void)
+  let deserialize =
+    foreign ?stub:(Some true)
+      "wasm_module_deserialize"
+      (ptr Store.t @-> ptr Byte.Vec.t @-> returning (ptr t))
+end;;
+
+module Func_T = struct
+  let name = "func"
+end;;
+module Func = struct
+  include DeclareType(Func_T)
+  
+  type callback_t =
+    Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr
+  type callback_with_env_t =
+    unit ptr -> Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr
+  let callback_t =
+    typedef
+      (funptr ~thread_registration:true (ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t)))
+      "wasm_func_callback_t"
+  let callback_with_env_t =
+    typedef
+      (funptr ~thread_registration:true (ptr void @-> ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t)))
+      "wasm_func_callback_with_env_t"
+  
+  let new_ =
+    foreign ?stub:(Some true)
+      "wasm_func_new"
+      (ptr Store.t @-> ptr Functype.t @-> callback_t @-> returning (ptr t))
+  let new_with_env =
+    foreign ?stub:(Some true)
+      "wasm_func_new_with_env"
+      (ptr Store.t @-> ptr Functype.t @-> callback_with_env_t @-> ptr void @->
+        (funptr ~thread_registration:true (ptr void @-> returning void)) @->
+        returning (ptr t))
+  
+  let type_ =
+    foreign ?stub:(Some true) "wasm_func_type" (ptr t @-> returning (ptr Functype.t))
+  let param_arity =
+    foreign ?stub:(Some true) "wasm_func_param_arity" (ptr t @-> returning size_t)
+  let result_arity =
+    foreign ?stub:(Some true) "wasm_func_result_arity" (ptr t @-> returning size_t)
+  
+  let call =
+    foreign ?stub:(Some true)
+      "wasm_func_call"
+      (ptr t @-> ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t))
+end;;
+
+module Global_T = struct
+  let name = "global"
+end;;
+module Global = struct
+  include DeclareType(Global_T)
+  
+  let new_ =
+    foreign ?stub:(Some true)
+      "wasm_global_new"
+      (ptr Store.t @-> ptr Globaltype.t @-> ptr Val.t @-> returning (ptr t))
+  
+  let type_ =
+    foreign ?stub:(Some true) "wasm_global_type" (ptr t @-> returning (ptr Globaltype.t))
+  
+  let get =
+    foreign ?stub:(Some true) "wasm_global_get" (ptr t @-> ptr Val.t @-> returning void)
+  let set =
+    foreign ?stub:(Some true) "wasm_global_set" (ptr t @-> ptr Val.t @-> returning void)
+end;;
+
+module Table_T = struct
+  let name = "table"
+end;;
+module Table = struct
+  include DeclareType(Table_T)
+  
+  type size_t = Unsigned.uint32
+  let size_t = typedef uint32_t "wasm_table_size_t"
+  
+  let new_ =
+    foreign ?stub:(Some true)
+      "wasm_table_new"
+      (ptr Store.t @-> ptr Tabletype.t @-> ptr Ref.t @-> returning (ptr t))
+  
+  let type_ =
+    foreign ?stub:(Some true) "wasm_table_type" (ptr t @-> returning (ptr Tabletype.t))
+  
+  let get =
+    foreign ?stub:(Some true) "wasm_table_get" (ptr t @-> size_t @-> returning (ptr Ref.t))
+  let set =
+    foreign ?stub:(Some true)
+      "wasm_table_set"
+      (ptr t @-> size_t @-> ptr Ref.t @-> returning bool)
+  
+  let size =
+    foreign ?stub:(Some true) "wasm_table_size" (ptr t @-> returning size_t)
+  let grow =
+    foreign ?stub:(Some true)
+      "wasm_table_grow"
+      (ptr t @-> size_t @-> ptr Ref.t @-> returning bool)
+end;;
+
+module Memory_T = struct
+  let name = "memory"
+end;;
+module Memory = struct
+  include DeclareType(Memory_T)
+  
+  type pages_t = Unsigned.uint32
+  let pages_t = typedef uint32_t "wasm_table_pages_t"
+  
+  let page_size = 0x10000 (* MEMORY_PAGE_SIZE *)
+  
+  let new_ =
+    foreign ?stub:(Some true)
+      "wasm_memoy_new"
+      (ptr Store.t @-> ptr Memorytype.t @-> returning (ptr t))
+  
+  let type_ =
+    foreign ?stub:(Some true) "wasm_memoy_type" (ptr t @-> returning (ptr Memorytype.t))
+  
+  let data =
+    foreign ?stub:(Some true) "wasm_memoy_data" (ptr t @-> returning (ptr Byte.byte))
+  let data_size =
+    foreign ?stub:(Some true) "wasm_memoy_data_size" (ptr t @-> returning size_t)
+  
+  let size =
+    foreign ?stub:(Some true) "wasm_memoy_size" (ptr t @-> returning pages_t)
+  let grow =
+    foreign ?stub:(Some true)
+      "wasm_memoy_grow"
+      (ptr t @-> pages_t @-> returning bool)
+end;;
+
+module Extern_T = struct
+  let name = "extern"
+end;;
+module Extern = struct
+  include DeclareType(Extern_T)
+  module V = struct
+    type data_type = t structure ptr
+    let data_type = ptr t
+    let name = Extern_T.name
+  end
+  module Vec = DeclareVec(V)
+  
+  let kind =
+    let f =
+      foreign ?stub:(Some true)
+        "wasm_extern_kind"
+        (ptr t @-> returning Externkind.externkind_C) in
+    fun v -> Externkind.externkind_OCaml_of_C (f v)
+  let type_ =
+    foreign ?stub:(Some true)
+      "wasm_extern_type"
+      (ptr t @-> returning (ptr Externtype.t))
+  
+  let of_func =
+    foreign ?stub:(Some true) "wasm_func_as_extern" (ptr Func.t @-> returning (ptr t))
+  let of_global =
+    foreign ?stub:(Some true) "wasm_global_as_extern" (ptr Global.t @-> returning (ptr t))
+  let of_table =
+    foreign ?stub:(Some true) "wasm_table_as_extern" (ptr Table.t @-> returning (ptr t))
+  let of_memory =
+    foreign ?stub:(Some true) "wasm_memory_as_extern" (ptr Memory.t @-> returning (ptr t))
+  
+  
+  let to_func =
+    foreign ?stub:(Some true) "wasm_func_as_extern" (ptr t @-> returning (ptr Func.t))
+  let to_global =
+    foreign ?stub:(Some true) "wasm_global_as_extern" (ptr t @-> returning (ptr Global.t))
+  let to_table =
+    foreign ?stub:(Some true) "wasm_table_as_extern" (ptr t @-> returning (ptr Table.t))
+  let to_memory =
+    foreign ?stub:(Some true) "wasm_memory_as_extern" (ptr t @-> returning (ptr Memory.t))
+  
+  let of_func_const =
+    foreign ?stub:(Some true) "wasm_func_as_extern_const" (ptr Func.t @-> returning (ptr t))
+  let of_global_const =
+    foreign ?stub:(Some true) "wasm_global_as_extern_const" (ptr Global.t @-> returning (ptr t))
+  let of_table_const =
+    foreign ?stub:(Some true) "wasm_table_as_extern_const" (ptr Table.t @-> returning (ptr t))
+  let of_memory_const =
+    foreign ?stub:(Some true) "wasm_memory_as_extern_const" (ptr Memory.t @-> returning (ptr t))
+  
+  
+  let to_func_const =
+    foreign ?stub:(Some true) "wasm_func_as_extern_const" (ptr t @-> returning (ptr Func.t))
+  let to_global_const =
+    foreign ?stub:(Some true) "wasm_global_as_extern_const" (ptr t @-> returning (ptr Global.t))
+  let to_table_const =
+    foreign ?stub:(Some true) "wasm_table_as_extern_const" (ptr t @-> returning (ptr Table.t))
+  let to_memory_const =
+    foreign ?stub:(Some true) "wasm_memory_as_extern_const" (ptr t @-> returning (ptr Memory.t))
+end;;
 
 module Instance_T = struct
   let name = "instance"
@@ -578,24 +884,5 @@ module Instance = struct
       "wasm_instance_exports"
       (ptr t @-> ptr Extern.Vec.t @-> returning void)
 end;;
-
-module Frame_T = struct
-  let name = "frame"
-end
-
-module Frame = struct
-  include DeclareOwn(Frame_T)
-  module V = struct
-    type data_type = t structure ptr
-    let data_type = ptr t
-    let name = T.name
-  end
-  module Vec = DeclareVec(V)
-  let duplicate = foreign ?stub:(Some true) (name ^ "_copy") (ptr t @-> returning (ptr t))
-  
-  let instance = foreign ?stub:(Some true) (name ^ "_instance") (ptr t @-> returning (ptr Instance.t))
-  let func_index = foreign ?stub:(Some true) (name ^ "_func_index") (ptr t @-> returning uint32_t)
-  let func_offset = foreign ?stub:(Some true) (name ^ "_func_offset") (ptr t @-> returning size_t)
-  let module_offset = foreign ?stub:(Some true) (name ^ "_module_offset") (ptr t @-> returning size_t)
-end;;
-*)
+let frame_instance f =
+  from_voidp Instance.t (to_voidp (Frame.instance f));;
