@@ -1,6 +1,25 @@
-# Dune output
-_build/
-
 # Wasmer library
-/src/bindings/dllwasmer.so
-/src/bindings/libwasmer.a
+
+## Static library
+/lib/libwasmer.a
+
+## Use the dynamic library
+/lib/libwasmer.so
+## Use the static library (huge file size)
+/lib/dllwasmer.so
+
+# OCaml output files
+*.cm[ioxa]
+*.cmx[as]
+*.o
+/lib/Wasmer_ocaml.a
+obj/**/*.mli
+
+## Makefile
+.depend
+
+# Test executables
+/test/hello/hello
+
+# Temp (WIP) files
+*.old

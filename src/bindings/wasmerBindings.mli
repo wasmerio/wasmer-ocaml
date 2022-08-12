@@ -1,163 +1,328 @@
 open Ctypes;;
 open Foreign;;
 
-module VECTOR(U: sig type data
-                     val data: data typ
-                     val name: string
-                     
-                     type coerce_from
-                     val coerce: coerce_from -> data end) : sig
-  module type T = sig
-    type data = U.data
-    type t = data structure
-    val data: data typ
-    val name: string
-    val t: t typ
-    val tsize: (Unsigned.size_t, t) field
-    val tdata: (data ptr, t) field
+module type StructType = sig
+  val name: string
+end;;
+module type VectorType = sig
+  type data_type
+  val data_type: data_type typ
+  val name: string
+end;;
 
-    val make: unit -> t ptr
-    val new_empty: t ptr -> unit
-    val new_uninitialized: t ptr -> Unsigned.size_t -> unit
-    val copy: t ptr -> t ptr -> unit
-    val delete: t ptr -> unit
+module type DECLARE_STRUCT = sig
+  val name: string
+  type t
+  val t: t structure typ
+end;;
+
+module type DECLARE_OWN = sig
+  include DECLARE_STRUCT
+  
+  val delete: t structure ptr -> unit
+end;;
+
+module DECLARE_VEC(U: VectorType) : sig
+  module type T = sig
+    type data_type = U.data_type
+    val data_type: data_type typ
     
-    val create_empty: unit -> t ptr
-    val create_uninit: int -> t ptr
-    val of_array: U.coerce_from array -> t ptr
-    val of_list: U.coerce_from list -> t ptr
-    val duplicate: t ptr -> t ptr
+    type t
+    val t: t structure typ
+    val fsize: (Unsigned.size_t, t structure) field
+    val fdata: (data_type ptr, t structure) field
+    
+    val name: string
+    val make: unit -> t structure ptr
+    val new_empty: t structure ptr -> unit
+    val new_uninitialized: t structure ptr -> Unsigned.size_t -> unit
+    val new_: t structure ptr -> Unsigned.size_t -> data_type ptr -> unit
+    val new_carray: t structure ptr -> data_type carray -> unit
+    val copy: t structure ptr -> t structure ptr -> unit
+    val delete: t structure ptr -> unit
+    
+    val make_empty: unit -> t structure ptr
+    val make_uninit: int -> t structure ptr
+    val of_list: data_type list -> t structure ptr
+    val duplicate: t structure ptr -> t structure ptr
   end
 end;;
-module Vector(T: sig type data
-                     val data: data typ
-                     val name: string
-                     
-                     type coerce_from
-                     val coerce: coerce_from -> data end) : VECTOR(T).T;;
 
-type engine;;
-val engine: engine typ;;
-val engine_new: unit -> engine ptr;;
-val engine_delete: engine ptr -> unit;;
-
-type store;;
-val store: store typ;;
-val store_new: engine ptr -> store ptr;;
-val store_delete: store ptr -> unit;;
-
-type byte = Unsigned.uint8;;
-val byte: byte typ;;
-module Byte_vec_chara : sig
-  type data = byte
-  val data: data typ
-  val name: string
+module type DECLARE_TYPE = sig
+  include DECLARE_OWN
+  module V : sig
+    type data_type = t structure ptr
+    val data_type: data_type typ
+    val name: string
+  end
+  module Vec: DECLARE_VEC(V).T
   
-  type coerce_from = char
-  val coerce: coerce_from -> data
+  val duplicate: t structure ptr -> t structure ptr
 end;;
-module Byte_vec : VECTOR(Byte_vec_chara).T;;
 
-type module_;;
-val module_: module_ typ;;
-val module_size: (Unsigned.size_t, module_) field;;
-
-val module_new: store ptr -> Byte_vec.t ptr -> module_ ptr;;
-val module_validate: store ptr -> Byte_vec.t ptr -> bool;;
-val module_delete: module_ ptr -> unit;;
-
-(* val module_imports: module_ ptr -> ImportType_vec.t ptr -> unit;;
-val module_exports: module_ ptr -> ExportType_vec.t ptr -> unit;; *)
-
-val module_serialize: module_ ptr -> Byte_vec.t ptr -> unit;;
-val module_deserialize: store ptr -> Byte_vec.t ptr -> module_ ptr;;
-
-(* Valtype *)
-type valkind =
-  | ValKind_i32
-  | ValKind_i64
-  | ValKind_f32
-  | ValKind_f64
-  | ValKind_AnyRef
-  | ValKind_FuncRef;;
-val valkind: Unsigned.uint8 typ;;
-val valkind_C_of_OCaml: valkind -> Unsigned.uint8;;
-val valkind_OCaml_of_C: Unsigned.uint8 -> valkind;;
-
-type valtype;;
-val valtype: valtype typ;;
-
-val valtype_new: valkind -> valtype ptr;;
-val valtype_kind: valtype ptr -> valkind;;
-val valtype_delete: valtype ptr -> unit;;
-
-module Valtype_vec_chara : sig
-  type data = valtype ptr
-  val data: data typ
-  val name: string
+module type DECLARE_REF_BASE = sig
+  include DECLARE_OWN
   
-  type coerce_from = data
-  val coerce: coerce_from -> data
+  val duplicate: t structure ptr -> t structure ptr
+  val same: t structure ptr -> t structure ptr -> bool
+  val get_host_info: t structure ptr -> unit ptr
+  val set_host_info: t structure ptr -> unit ptr -> unit
+  val set_host_info_with_finalizer: t structure ptr -> unit ptr -> (unit ptr -> unit) -> unit
 end;;
-module Valtype_vec : VECTOR(Valtype_vec_chara).T;;
 
-(* Functype *)
-type functype;;
-val functype: functype typ;;
-val functype_size: (Unsigned.size_t, functype) field;;
+module Ref_T: StructType;;
+module Ref: DECLARE_STRUCT;;
 
-val _functype_new_c: Valtype_vec.t ptr -> Valtype_vec.t ptr -> functype ptr;;
-val _functype_params_c: functype ptr -> Valtype_vec.t ptr;;
-val _functype_results_c: functype ptr -> Valtype_vec.t ptr;;
+module type DECLARE_REF = sig
+  include DECLARE_REF_BASE
+  
+  val to_ref: t structure ptr -> Ref.t structure ptr
+  val of_ref: Ref.t structure ptr -> t structure ptr
+  val to_ref_const: t structure ptr -> Ref.t structure ptr
+  val of_ref_const: Ref.t structure ptr -> t structure ptr
+end;;
 
-val functype_new_0_0: unit -> functype ptr;;
-val functype_new_args_0: valtype ptr list -> functype ptr;;
-val functype_new_0_res: valtype ptr list -> functype ptr;;
-val functype_new_args_res: valtype ptr list -> valtype ptr list -> functype ptr;;
 
-val functype_delete: functype ptr -> unit;;
+module Byte : sig
+  type byte = Unsigned.uint8
+  val byte: byte typ
+  module V: VectorType with type data_type = byte
+  module Vec : sig
+    include DECLARE_VEC(V).T
+    
+    val of_char_list: char list -> t structure ptr
+    val of_int_list: int list -> t structure ptr
+    val of_bytes: bytes -> t structure ptr
+  end
+end;;
+module Name : sig
+  include module type of Byte.Vec
+  
+  val of_string: string -> t structure ptr
+end;;
 
-(* Val *)
-type val_;;
-val val_: val_ typ;;
-val val_kind: (Unsigned.size_t, val_) field;;
+module Config_T: StructType;;
+(** Embedders may provide custom functions for manipulating configs. *)
+module Config : sig
+  include DECLARE_OWN
+  
+  val new_: unit -> t structure ptr
+end;;
+
+module Engine_T: StructType;;
+module Engine : sig
+  include DECLARE_OWN
+  
+  val new_: unit -> t structure ptr
+  val new_with_config: Config.t structure ptr -> t structure ptr
+end;;
+
+module Store_T: StructType;;
+module Store : sig
+  include DECLARE_OWN
+  
+  val new_: Engine.t structure ptr -> t structure ptr
+end;;
+
+module Mutability : sig
+  type t = Unsigned.uint8
+  val t: t typ
+end;;
+module Mutability_e : sig
+  val const: int
+  val var: int
+end;;
+
+module Limits : sig
+  type t
+  val t: t structure typ
+  val min: (Unsigned.uint32, t structure) field
+  val max: (Unsigned.uint32, t structure) field
+end;;
+val limits_max_default: int
+
+module Valkind : sig
+  type valkind_OCaml =
+    | ValKind_i32
+    | ValKind_i64
+    | ValKind_f32
+    | ValKind_f64
+    | ValKind_AnyRef
+    | ValKind_FuncRef
+  
+  type valkind_C = Unsigned.uint8
+  val valkind_C: valkind_C typ
+  val valkind_C_of_OCaml: valkind_OCaml -> valkind_C
+  val valkind_OCaml_of_C: valkind_C -> valkind_OCaml
+end;;
+
+module Valtype_T: StructType;;
+module Valtype : sig
+  include DECLARE_TYPE
+  
+  val new_: Valkind.valkind_OCaml -> t structure ptr
+  val kind: t structure ptr -> Valkind.valkind_OCaml
+end;;
+
+module Functype_T: StructType;;
+module Functype : sig
+  include DECLARE_TYPE
+  
+  val new_: Valtype.Vec.t structure ptr -> Valtype.Vec.t structure ptr -> t structure ptr
+  val params: t structure ptr -> Valtype.Vec.t structure ptr
+  val results: t structure ptr -> Valtype.Vec.t structure ptr
+end;;
+
+module Globaltype_T: StructType;;
+module Globaltype : sig
+  include DECLARE_TYPE
+  
+  val new_: Valtype.t structure ptr -> Valkind.valkind_C ptr -> t structure ptr
+  val content: t structure ptr -> Valtype.t structure ptr
+  val mutability: t structure ptr -> Valkind.valkind_C
+end;;
+
+module Tabletype_T: StructType;;
+module Tabletype : sig
+  include DECLARE_TYPE
+  
+  val new_: Valtype.t structure ptr -> Limits.t structure ptr -> t structure ptr
+  val elements: t structure ptr -> Valtype.t structure ptr
+  val limits: t structure ptr -> Limits.t structure ptr
+end;;
+
+module Memorytype_T: StructType;;
+module Memorytype : sig
+  include DECLARE_TYPE
+  
+  val new_: Limits.t structure ptr -> t structure ptr
+  val limits: t structure ptr -> Limits.t structure ptr
+end;;
+
+module Externkind : sig
+  type externkind_OCaml =
+    | ExternKind_Func
+    | ExternKind_Global
+    | ExternKind_Table
+    | ExternKind_Memory
+  
+  type externkind_C = Unsigned.uint8
+  val externkind_C: externkind_C typ
+  val externkind_C_of_OCaml: externkind_OCaml -> externkind_C
+  val externkind_OCaml_of_C: externkind_C -> externkind_OCaml
+end;;
+
+module Externtype_T: StructType;;
+module Externtype : sig
+  include DECLARE_TYPE
+  
+  val kind: t structure ptr -> Externkind.externkind_OCaml
+  
+  val of_functype: Functype.t structure ptr -> t structure ptr
+  val of_globaltype: Globaltype.t structure ptr -> t structure ptr
+  val of_tabletype: Tabletype.t structure ptr -> t structure ptr
+  val of_memorytype: Memorytype.t structure ptr -> t structure ptr
+  
+  val to_functype: t structure ptr -> Functype.t structure ptr
+  val to_globaltype: t structure ptr -> Globaltype.t structure ptr
+  val to_tabletype: t structure ptr -> Tabletype.t structure ptr
+  val to_memorytype: t structure ptr -> Memorytype.t structure ptr
+  
+  val of_functype_const: Functype.t structure ptr -> t structure ptr
+  val of_globaltype_const: Globaltype.t structure ptr -> t structure ptr
+  val of_tabletype_const: Tabletype.t structure ptr -> t structure ptr
+  val of_memorytype_const: Memorytype.t structure ptr -> t structure ptr
+  
+  val to_functype_const: t structure ptr -> Functype.t structure ptr
+  val to_globaltype_const: t structure ptr -> Globaltype.t structure ptr
+  val to_tabletype_const: t structure ptr -> Tabletype.t structure ptr
+  val to_memorytype_const: t structure ptr -> Memorytype.t structure ptr
+end;;
+
+module Importtype_T: StructType;;
+module Importtype : sig
+  include DECLARE_TYPE
+  
+  val new_: Name.t structure ptr -> Name.t structure ptr -> Externtype.t structure ptr -> t structure ptr
+  val module_: t structure ptr -> Name.t structure ptr
+  val name: t structure ptr -> Name.t structure ptr
+  val type_: t structure ptr -> Externtype.t structure ptr
+end;;
+
+module Exporttype_T: StructType;;
+module Exporttype : sig
+  include DECLARE_TYPE
+  
+  val new_: Name.t structure ptr -> Externtype.t structure ptr -> t structure ptr
+  val name_: t structure ptr -> Name.t structure ptr
+  val type_: t structure ptr -> Externtype.t structure ptr
+end;;
+
+module Val : sig
+  type t
+  val t: t structure typ
+  val fkind: (Valkind.valkind_C, t structure) field
+  module Anon0 : sig
+    type t
+    val t: t union typ
+    val fi32: (int32, t union) field
+    val fi64: (int64, t union) field
+    val ff32: (float, t union) field
+    val ff64: (float, t union) field
+    val fref: (Ref.t structure ptr, t union) field
+  end
+  val fof: (Anon0.t union, t structure) field
+  
+  val of_i32: int32 -> t structure
+  val of_i64: int64 -> t structure
+  val of_f32: float -> t structure
+  val of_f64: float -> t structure
+  val of_ref: Ref.t structure ptr -> t structure
+  val new_: unit -> t structure
+  
+  val copy: t structure ptr -> t structure ptr -> unit
+  val delete: t structure ptr -> unit
+  
+  val duplicate: t structure ptr -> t structure
+  
+  module V: VectorType with type data_type = t structure
+  module Vec: DECLARE_VEC(V).T
+end;;
+
+
+module type DECLARE_SHAREABLE_REF = sig
+  include DECLARE_REF
+  module S: StructType
+  module Shared: DECLARE_OWN
+  
+  val to_shared: t structure ptr -> Shared.t structure ptr
+  val of_shared: Store.t structure ptr -> Shared.t structure ptr -> t structure ptr
+end;;
+
 (*
-(* Trap *)
-type trap;;
-val trap: trap typ;;
-val trap_size: (Unsigned.size_t, trap) field;;
+(* Module, Extern, Trap *)
 
-(* Func *)
-type func;;
-val func: func typ;;
-val func_size: (Unsigned.size_t, func) field;;
+module Instance_T: StructType;;
 
-val func_0_0_callback: (val_ ptr -> val_ ptr -> trap ptr) typ;;
-
-val func_new: store ptr -> functype ptr -> (val_ ptr -> val_ ptr -> trap ptr) -> func ptr;;
-val func_delete: func ptr -> unit;;
-
-(* Extern *)
-type extern;;
-val extern: extern typ;;
-val extern_size: (Unsigned.size_t, extern) field;;
-
-val func_as_extern: func ptr -> extern ptr;;
-val extern_as_func: extern ptr -> func ptr;;
-
-module Extern_vec_chara : sig
-  type data = extern ptr
-  val data: data typ
-  val name: string
+module Instance : sig
+  include DECLARE_REF
+  
+  val new_: Store.t ptr -> Module.t ptr -> Extern.Vec.t ptr -> Trap.t ptr ptr -> t ptr
+  
+  val exports: t ptr -> Extern.Vec.t ptr -> unit
 end;;
-module Extern_vec : VECTOR(Extern_vec_chara).T;;
 
-(* Instance *)
-type instance;;
-val instance: instance typ;;
-val instance_size: (Unsigned.size_t, instance) field;;
+module Frame_T: StructType;;
 
-val instance_new: store ptr -> module_ ptr -> extern ptr ptr -> unit ptr -> instance ptr;;
-val instance_exports: instance ptr -> Extern_vec.t ptr -> unit;;
-val func_call: func ptr -> val_ ptr -> val_ ptr -> unit ptr;;
+module Frame : sig
+  include DECLARE_OWN
+  module V : VectorType with type data_type = t structure ptr
+  module Vec : DECLARE_VEC(V).T
+  val duplicate: t ptr -> t ptr
+  
+  val instance: t ptr -> Instance.t ptr
+  val func_index: t ptr -> uint32_t
+  val func_offset: t ptr -> size_t
+  val module_offset: t ptr -> size_t
+end;;
 *)

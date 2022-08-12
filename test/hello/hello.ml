@@ -2,9 +2,9 @@
 open Wasmer_ocaml.WasmerBindings;;
 
 let () =
-ignore Ref.same;;(*
   print_endline "Initializing...";
   let eng = Engine.new_ () in
+ignore eng (*
   let sto = Store.new_ eng in
   print_endline "Loading binary...";
   let wasm =
