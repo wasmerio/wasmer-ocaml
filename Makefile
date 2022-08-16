@@ -24,12 +24,13 @@ all: .depend
 .PHONY: all
 
 .depend: src/bindings/wasmerBindings.ml src/bindings/util.ml
-	$(SILENCER)$(OCAMLDEP) $(INCLUDES) src/bindings/wasmerBindings.ml src/bindings/util.ml > .depend.tmp
+	$(SILENCER)$(OCAMLDEP) $(INCLUDES) $^ > .depend.tmp
+	$(SILENCER)$(RM) .depend
 	$(SILENCER)mv .depend.tmp .depend
 include .depend
 
 
-all: wasmer_ocaml test/instance/instance
+all: wasmer_ocaml test/instance/instance test/hello/hello
 wasmer_ocaml: lib/Wasmer_ocaml.cmxs lib/Wasmer_ocaml.cmxa
 
 obj/bindings/Wasmer_ocaml.cmo: src/bindings/wasmer_ocaml.ml
@@ -236,13 +237,19 @@ test/instance/instance: lib/Wasmer_ocaml.cmxa obj/test/instance/instance.cmx
 		lib/Wasmer_ocaml.cmxa \
 		obj/test/instance/instance.cmx
 
-tests: test/instance/instance
-	test/instance/instance
+# OCaml bug: the sigaltstack can't be changed by an external library
+# or the program will crash on exit
+# https://github.com/ocaml/ocaml/issues/11489
+# Should be fixed by OCaml 4.14 (#11496) and OCaml 5.0
+tests: test/instance/instance test/hello/hello
+	@echo ""; echo "Test: instance"; test/instance/instance || true
+	@echo ""; echo "Test: hello"; test/hello/hello || true
 
 clean:
-	$(SILENCER)$(RM) src/bindings/wasmerBindings.cmi
+# Output
 	$(SILENCER)$(RM) obj/bindings/*.mli obj/bindings/*.c* obj/bindings/*.o
 	$(SILENCER)$(RM) lib/Wasmer_ocaml*.*
-	$(SILENCER)$(RM) src/bindings/wasmer_ocaml.a
+	
+# Tests
 	$(SILENCER)$(RM) obj/test/instance/instance.* obj/test/hello/hello.*
 	$(SILENCER)$(RM) test/instance/instance test/hello/hello
