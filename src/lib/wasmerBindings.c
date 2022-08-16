@@ -17,6 +17,7 @@ void assertions() {
                 "incompatible pointer type");
 }
 
+#ifdef WASM_IMPORT_ALL
 #undef WASM_H
 #undef WASM_API_EXTERN
 #define WASM_API_EXTERN(l,n,r) ptr = &n;
@@ -25,7 +26,6 @@ void assertions() {
 #undef ENUM
 #define ENUM(...)
 void _instanciate_all() {
-//#include "wasmerBindings.h"
-	void(*ptr)() = &wasm_byte_vec_new_empty;
-	ptr = &wasm_valtype_vec_new_empty;
+#include "wasmerBindings.h"
 }
+#endif
