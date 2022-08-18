@@ -1,106 +1,165 @@
 open Ctypes;;
 
+exception Returned_null of string;;
+exception Invalid_access of string;;
+
+type object_state =
+  | State_Owned
+  | State_Const
+  | State_Dependent of ((unit -> object_state) * (object_state -> unit))
+  | State_PassedAway;;
+val get_real_state: object_state -> object_state;;
+val max_state_const: object_state -> object_state;;
+
+module type ObjectType = sig
+  type t
+  val make: unit -> t ptr (** Not part of the public API: DO NOT USE *)
+  val delete: t ptr -> unit (** Not part of the public API: DO NOT USE *)
+end;;
 module type StructType = sig
   val name: string
 end;;
 module type VectorType = sig
   type data_type
   val data_type: data_type typ
+  
   val name: string
+  
+  type owning_struct
+  val grab_ownership: owning_struct -> data_type
+  val to_dependent:
+    data_type -> (unit -> object_state) * (object_state -> unit) -> owning_struct
 end;;
 
-module type DECLARE_STRUCT = sig
+module OwnableObject(O: ObjectType) : sig
+  type s
+  
+  val make_new: unit -> s
+  val make_from_raise: O.t ptr -> object_state -> s
+  val make_from_unsafe: O.t ptr -> object_state -> s
+  
+  val get_state: s -> object_state
+  val lose_ownership: s -> unit
+  (** Give the ownership of this to the caller
+      Equivalent to (let p = get_ptr <s> in lose_ownership <s>; p) *)
+  val grab_ownership: s -> O.t ptr
+  (** Delete then give a given-away pointer (own-out parameters in the C API) *)
+  val gain_ownership_back: s -> O.t ptr
+  
+  val is_null: s -> bool
+  val get_ptr: s -> O.t ptr
+  val get_ptr_const: s -> O.t ptr
+  (** Inherently unsafe (fails if the pointer is not given away) *)
+  val get_ptr_givenaway: s -> O.t ptr
+  
+  val delete: s -> unit
+end;;
+
+module DeclareOwn(T: StructType) : sig
   val name: string
   type t
   val t: t structure typ
-end;;
-
-module type DECLARE_OWN = sig
-  include DECLARE_STRUCT
   
-  val delete: t structure ptr -> unit
+  module O: ObjectType with type t = t structure
+  include module type of struct include OwnableObject(O) end
 end;;
 
-module DECLARE_VEC(U: VectorType) : sig
-  module type T = sig
-    type data_type = U.data_type
-    val data_type: data_type typ
-    
-    type t
-    val t: t structure typ
-    val fsize: (Unsigned.size_t, t structure) field
-    val fdata: (data_type ptr, t structure) field
-    
-    val name: string
-    val make: unit -> t structure ptr
-    val new_empty: t structure ptr -> unit
-    val new_uninitialized: t structure ptr -> Unsigned.size_t -> unit
-    val new_: t structure ptr -> Unsigned.size_t -> data_type ptr -> unit
-    val new_carray: t structure ptr -> data_type carray -> unit
-    val copy: t structure ptr -> t structure ptr -> unit
-    val delete: t structure ptr -> unit
-    
-    val make_empty: unit -> t structure ptr
-    val make_empty_null: unit -> t structure ptr
-    val make_uninit: int -> t structure ptr
-    val of_carray: data_type carray -> t structure ptr
-    val of_list: data_type list -> t structure ptr
-    val duplicate: t structure ptr -> t structure ptr
-  end
+module DeclareVec(U: VectorType) : sig
+  type data_type = U.data_type
+  val data_type: data_type typ
+  
+  val name: string
+  
+  type t
+  val t: t structure typ
+  val fsize: (Unsigned.size_t, t structure) field
+  val fdata: (data_type ptr, t structure) field
+  
+  module O : ObjectType with type t = t structure
+  include module type of struct include OwnableObject(O) end
+  
+  val make_empty: unit -> s
+  val make_empty_null: unit -> s (** Initializes the data field to NULL *)
+  val make_uninit: int -> s
+  (*val new_empty: s -> unit
+  val new_empty_null: s -> unit (** Initializes the data field to NULL *)
+  val new_uninit: s -> int -> unit*)
+  
+  val duplicate: s -> s
+  
+  (** The vector always get ownership of the data *)
+  val of_array: U.owning_struct array -> s
+  val of_list: U.owning_struct list -> s
+  
+  val get_size: s -> int
+  val get_element: s -> int -> U.owning_struct
+  val get_element_unsafe: s -> int -> U.owning_struct
+  val get_element_const: s -> int -> U.owning_struct
+  val get_element_const_unsafe: s -> int -> U.owning_struct
+  val set_element: s -> int -> U.owning_struct -> unit
+  val set_element_unsafe: s -> int -> U.owning_struct -> unit
 end;;
 
-module type DECLARE_TYPE = sig
-  include DECLARE_OWN
+module DeclareType(T: StructType) : sig
+  include module type of struct include DeclareOwn(T) end
   module V : sig
     type data_type = t structure ptr
     val data_type: data_type typ
+    
     val name: string
+    
+    type owning_struct = s
+    val grab_ownership: owning_struct -> data_type
+    val to_dependent:
+      data_type -> (unit -> object_state) * (object_state -> unit) -> owning_struct
   end
-  module Vec: DECLARE_VEC(V).T
+  module Vec: module type of struct include DeclareVec(V) end
   
-  val duplicate: t structure ptr -> t structure ptr
+  val duplicate: s -> s
+  val duplicate_unsafe: s -> s
 end;;
 
-module type DECLARE_REF_BASE = sig
-  include DECLARE_OWN
+module DeclareRefBase(T: StructType) : sig
+  include module type of struct include DeclareOwn(T) end
   
-  val duplicate: t structure ptr -> t structure ptr
-  val same: t structure ptr -> t structure ptr -> bool
-  val get_host_info: t structure ptr -> unit ptr
-  val set_host_info: t structure ptr -> unit ptr -> unit
-  val set_host_info_with_finalizer: t structure ptr -> unit ptr -> (unit ptr -> unit) -> unit
+  val duplicate: s -> s
+  val duplicate_unsafe: s -> s
+  val same: s -> s -> bool
+  val get_host_info: s -> unit ptr
+  val set_host_info: s -> unit ptr -> unit
+  val set_host_info_with_finalizer: s -> unit ptr -> (unit ptr -> unit) -> unit
   (** Finalizers will not get GC'd (so long as they are called once) *)
 end;;
 
 module Ref_T: StructType;;
-module Ref: DECLARE_STRUCT;;
+module Ref: module type of DeclareRefBase(Ref_T);;
 
-module type DECLARE_REF = sig
-  include DECLARE_REF_BASE
+module DeclareRef(T: StructType) : sig
+  include module type of struct include DeclareRefBase(T) end
   
-  val to_ref: t structure ptr -> Ref.t structure ptr
-  val of_ref: Ref.t structure ptr -> t structure ptr
-  val to_ref_const: t structure ptr -> Ref.t structure ptr
-  val of_ref_const: Ref.t structure ptr -> t structure ptr
+  val to_ref: s -> Ref.s
+  val of_ref: Ref.s -> s
+  val to_ref_const: s -> Ref.s
+  val of_ref_const: Ref.s -> s
 end;;
 
 
 module Byte : sig
   type byte = Unsigned.uint8
   val byte: byte typ
-  module V: VectorType with type data_type = byte
+  module V: VectorType with type data_type = byte with type owning_struct = byte
   module Vec : sig
-    include DECLARE_VEC(V).T
+    include module type of struct include DeclareVec(V) end
     
-    val of_char_list: char list -> t structure ptr
-    val of_int_list: int list -> t structure ptr
-    val of_bytes: bytes -> t structure ptr
+    val of_char_list: char list -> s
+    val of_int_list: int list -> s
+    val of_bytes: bytes -> s
   end
 end;;
 module Name : sig
   include module type of struct include Byte.Vec end
   
-  val of_string: string -> t structure ptr
+  val of_string: string -> s
 end;;
 module Message : sig
   include module type of struct include Name end
@@ -109,33 +168,39 @@ end;;
 module Config_T: StructType;;
 (** Embedders may provide custom functions for manipulating configs. *)
 module Config : sig
-  include DECLARE_OWN
+  include module type of struct include DeclareOwn(Config_T) end
   
-  val new_: unit -> t structure ptr
+  val new_: unit -> s
+  val new_unsafe: unit -> s
 end;;
 
 module Engine_T: StructType;;
 module Engine : sig
-  include DECLARE_OWN
+  include module type of struct include DeclareOwn(Engine_T) end
   
-  val new_: unit -> t structure ptr
-  val new_with_config: Config.t structure ptr -> t structure ptr
+  val new_: unit -> s
+  val new_unsafe: unit -> s
+  
+  val new_with_config: Config.s -> s
+  val new_with_config_unsafe: Config.s -> s
 end;;
 
 module Store_T: StructType;;
 module Store : sig
-  include DECLARE_OWN
+  include module type of struct include DeclareOwn(Store_T) end
   
-  val new_: Engine.t structure ptr -> t structure ptr
+  val new_: Engine.s -> s
+  val new_unsafe: Engine.s -> s
 end;;
 
 module Mutability : sig
+  type ocaml = Const | Var
+  
   type t = Unsigned.uint8
   val t: t typ
-end;;
-module Mutability_e : sig
-  val const: int
-  val var: int
+  
+  val of_c: t -> ocaml
+  val to_c: ocaml -> t
 end;;
 
 module Limits : sig
@@ -148,126 +213,146 @@ module Limits : sig
 end;;
 
 module Valkind : sig
-  type valkind_OCaml =
-    | ValKind_i32
-    | ValKind_i64
-    | ValKind_f32
-    | ValKind_f64
-    | ValKind_AnyRef
-    | ValKind_FuncRef
+  type ocaml =
+    | I32
+    | I64
+    | F32
+    | F64
+    | AnyRef
+    | FuncRef
   
-  type valkind_C = Unsigned.uint8
-  val valkind_C: valkind_C typ
-  val valkind_C_of_OCaml: valkind_OCaml -> valkind_C
-  val valkind_OCaml_of_C: valkind_C -> valkind_OCaml
+  type t = Unsigned.uint8
+  val t: t typ
+  val to_c: ocaml -> t
+  val of_c: t -> ocaml
+  
+  val is_num: ocaml -> bool
+  val is_ref: ocaml -> bool
 end;;
 
 module Valtype_T: StructType;;
 module Valtype : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Valtype_T) end
   
-  val new_: Valkind.valkind_OCaml -> t structure ptr
-  val kind: t structure ptr -> Valkind.valkind_OCaml
+  val new_: Valkind.ocaml -> s
+  val new_unsafe: Valkind.ocaml -> s
+  val kind: s -> Valkind.ocaml
+  
+  val is_num: s -> bool
+  val is_ref: s -> bool
 end;;
 
 module Functype_T: StructType;;
 module Functype : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Functype_T) end
   
-  val new_: Valtype.Vec.t structure ptr -> Valtype.Vec.t structure ptr -> t structure ptr
-  val params: t structure ptr -> Valtype.Vec.t structure ptr
-  val results: t structure ptr -> Valtype.Vec.t structure ptr
+  val new_: Valtype.Vec.s -> Valtype.Vec.s -> s
+  val new_unsafe: Valtype.Vec.s -> Valtype.Vec.s -> s
+  
+  val params: s -> Valtype.Vec.s
+  val results: s -> Valtype.Vec.s
 end;;
 
 module Globaltype_T: StructType;;
 module Globaltype : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Globaltype_T) end
   
-  val new_: Valtype.t structure ptr -> Valkind.valkind_C ptr -> t structure ptr
-  val content: t structure ptr -> Valtype.t structure ptr
-  val mutability: t structure ptr -> Valkind.valkind_C
+  val new_: Valtype.s -> Mutability.ocaml -> s
+  val new_unsafe: Valtype.s -> Mutability.ocaml -> s
+  
+  val content: s -> Valtype.s
+  val mutability: s -> Mutability.ocaml
 end;;
 
 module Tabletype_T: StructType;;
 module Tabletype : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Tabletype_T) end
   
-  val new_: Valtype.t structure ptr -> Limits.t structure ptr -> t structure ptr
-  val elements: t structure ptr -> Valtype.t structure ptr
-  val limits: t structure ptr -> Limits.t structure ptr
+  val new_: Valtype.s -> Limits.t structure ptr -> s
+  val new_unsafe: Valtype.s -> Limits.t structure ptr -> s
+  
+  val elements: s -> Valtype.s
+  val limits: s -> Limits.t structure ptr
 end;;
 
 module Memorytype_T: StructType;;
 module Memorytype : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Memorytype_T) end
   
-  val new_: Limits.t structure ptr -> t structure ptr
-  val limits: t structure ptr -> Limits.t structure ptr
+  val new_: Limits.t structure ptr -> s
+  val new_unsafe: Limits.t structure ptr -> s
+  
+  val limits: s -> Limits.t structure ptr
 end;;
 
 module Externkind : sig
-  type externkind_OCaml =
+  type ocaml =
     | ExternKind_Func
     | ExternKind_Global
     | ExternKind_Table
     | ExternKind_Memory
   
-  type externkind_C = Unsigned.uint8
-  val externkind_C: externkind_C typ
-  val externkind_C_of_OCaml: externkind_OCaml -> externkind_C
-  val externkind_OCaml_of_C: externkind_C -> externkind_OCaml
+  type t = Unsigned.uint8
+  val t: t typ
+  
+  val of_c: t -> ocaml
+  val to_c: ocaml -> t
 end;;
 
 module Externtype_T: StructType;;
 module Externtype : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Externtype_T) end
   
-  val kind: t structure ptr -> Externkind.externkind_OCaml
+  val kind: s -> Externkind.ocaml
   
-  val of_functype: Functype.t structure ptr -> t structure ptr
-  val of_globaltype: Globaltype.t structure ptr -> t structure ptr
-  val of_tabletype: Tabletype.t structure ptr -> t structure ptr
-  val of_memorytype: Memorytype.t structure ptr -> t structure ptr
+  val of_functype: Functype.s -> s
+  val of_globaltype: Globaltype.s -> s
+  val of_tabletype: Tabletype.s -> s
+  val of_memorytype: Memorytype.s -> s
   
-  val to_functype: t structure ptr -> Functype.t structure ptr
-  val to_globaltype: t structure ptr -> Globaltype.t structure ptr
-  val to_tabletype: t structure ptr -> Tabletype.t structure ptr
-  val to_memorytype: t structure ptr -> Memorytype.t structure ptr
+  val to_functype: s -> Functype.s
+  val to_globaltype: s -> Globaltype.s
+  val to_tabletype: s -> Tabletype.s
+  val to_memorytype: s -> Memorytype.s
   
-  val of_functype_const: Functype.t structure ptr -> t structure ptr
-  val of_globaltype_const: Globaltype.t structure ptr -> t structure ptr
-  val of_tabletype_const: Tabletype.t structure ptr -> t structure ptr
-  val of_memorytype_const: Memorytype.t structure ptr -> t structure ptr
+  val of_functype_const: Functype.s -> s
+  val of_globaltype_const: Globaltype.s -> s
+  val of_tabletype_const: Tabletype.s -> s
+  val of_memorytype_const: Memorytype.s -> s
   
-  val to_functype_const: t structure ptr -> Functype.t structure ptr
-  val to_globaltype_const: t structure ptr -> Globaltype.t structure ptr
-  val to_tabletype_const: t structure ptr -> Tabletype.t structure ptr
-  val to_memorytype_const: t structure ptr -> Memorytype.t structure ptr
+  val to_functype_const: s -> Functype.s
+  val to_globaltype_const: s -> Globaltype.s
+  val to_tabletype_const: s -> Tabletype.s
+  val to_memorytype_const: s -> Memorytype.s
 end;;
 
 module Importtype_T: StructType;;
 module Importtype : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Importtype_T) end
   
-  val new_: Name.t structure ptr -> Name.t structure ptr -> Externtype.t structure ptr -> t structure ptr
-  val module_: t structure ptr -> Name.t structure ptr
-  val name: t structure ptr -> Name.t structure ptr
-  val type_: t structure ptr -> Externtype.t structure ptr
+  val new_: Name.s -> Name.s -> Externtype.s -> s
+  val new_unsafe: Name.s -> Name.s -> Externtype.s -> s
+  
+  val module_: s -> Name.s
+  val name: s -> Name.s
+  val type_: s -> Externtype.s
 end;;
 
 module Exporttype_T: StructType;;
 module Exporttype : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Exporttype_T) end
   
-  val new_: Name.t structure ptr -> Externtype.t structure ptr -> t structure ptr
-  val name_: t structure ptr -> Name.t structure ptr
-  val type_: t structure ptr -> Externtype.t structure ptr
+  val new_: Name.s -> Externtype.s -> s
+  val new_unsafe: Name.s -> Externtype.s -> s
+  
+  val name: s -> Name.s
+  val type_: s -> Externtype.s
 end;;
 
 module Val : sig
   type t
   val t: t structure typ
-  val fkind: (Valkind.valkind_C, t structure) field
+  val fkind: (Valkind.t, t structure) field
   module Anon0 : sig
     type t
     val t: t union typ
@@ -279,83 +364,105 @@ module Val : sig
   end
   val fof: (Anon0.t union, t structure) field
   
-  val of_i32: int32 -> t structure
-  val of_i64: int64 -> t structure
-  val of_f32: float -> t structure
-  val of_f64: float -> t structure
-  val of_ref: Ref.t structure ptr -> t structure
-  val new_: unit -> t structure
+  module O: ObjectType with type t = t structure
+  include module type of struct include OwnableObject(O) end
   
-  val copy: t structure ptr -> t structure ptr -> unit
-  val delete: t structure ptr -> unit
+  val of_i32: int32 -> s
+  val of_i64: int64 -> s
+  val of_f32: float -> s
+  val of_f64: float -> s
+  val of_ref: Ref.s -> s
+  val new_: unit -> s
   
-  val duplicate: t structure ptr -> t structure
+  type ocaml =
+    | I32 of int32
+    | I64 of int64
+    | F32 of float
+    | F64 of float
+    | Ref of Ref.s
   
-  module V: VectorType with type data_type = t structure
-  module Vec: DECLARE_VEC(V).T
+  val get_kind: s -> Valkind.ocaml
+  
+  val get_i32: s -> int32
+  val get_i64: s -> int64
+  val get_f32: s -> float
+  val get_f64: s -> float
+  val get_ref: s -> Ref.s
+  
+  val of_c: s -> ocaml
+  val to_c: ocaml -> s
+  
+  val duplicate: s -> s
+  
+  module V: VectorType with type data_type = t structure with type owning_struct = s
+  module Vec: module type of struct include DeclareVec(V) end
 end;;
 
 
-module type DECLARE_SHAREABLE_REF = sig
-  include DECLARE_REF
+module DeclareShareableRef(T: StructType) : sig
+  include module type of struct include DeclareRef(T) end
   module S: StructType
-  module Shared: DECLARE_OWN
+  module Shared: module type of struct include DeclareOwn(S) end
   
-  val to_shared: t structure ptr -> Shared.t structure ptr
-  val of_shared: Store.t structure ptr -> Shared.t structure ptr -> t structure ptr
+  val to_shared: s -> Shared.s
+  val of_shared: Store.s -> Shared.s -> s
 end;;
 
 
 module Frame_T: StructType;;
 module Frame : sig
-  include DECLARE_OWN
-  module V : VectorType with type data_type = t structure ptr
-  module Vec : DECLARE_VEC(V).T
-  val duplicate: t structure ptr -> t structure ptr
+  include module type of struct include DeclareOwn(Frame_T) end
+  module V: VectorType with type data_type = t structure ptr with type owning_struct = s
+  module Vec: module type of struct include DeclareVec(V) end
   
-  (** Returns an Instance.t *)
-  val instance: t structure ptr -> unit ptr
-  val func_index: t structure ptr -> Unsigned.uint32
-  val func_offset: t structure ptr -> Unsigned.size_t
-  val module_offset: t structure ptr -> Unsigned.size_t
+  val duplicate: s -> s
+  val duplicate_unsafe: s -> s
+  
+  (* Frame.instance -> see frame_instance (cannot be put here as Instance is not defined) *)
+  val func_index: s -> int
+  val func_offset: s -> int
+  val module_offset: s -> int
 end;;
 
 module Trap_T: StructType;;
 module Trap : sig
-  include DECLARE_REF
+  include module type of struct include DeclareRef(Trap_T) end
   
-  val new_: Store.t structure ptr -> Message.t structure ptr -> t structure ptr
+  val new_: Store.s -> Message.s -> s
+  val new_unsafe: Store.s -> Message.s -> s
   
-  val message: t structure ptr -> Message.t structure ptr -> unit
-  val origin: t structure ptr -> Frame.t structure ptr
-  val trace: t structure ptr -> Frame.Vec.t structure ptr -> unit
+  val message: s -> Message.s -> unit
+  val origin: s -> Frame.s
+  val trace: s -> Frame.Vec.s -> unit
 end;;
 
 module Foreign_T: StructType;;
 module Foreign : sig
-  include DECLARE_REF
+  include module type of struct include DeclareRef(Foreign_T) end
   
-  val new_: Store.t structure ptr -> t structure ptr
+  val new_: Store.s -> s
+  val new_unsafe: Store.s -> s
 end;;
 
 module Module_T: StructType;;
 module Module : sig
-  include DECLARE_REF
+  include module type of struct include DeclareRefBase(Module_T) end
   
-  val new_: Store.t structure ptr -> Byte.Vec.t structure ptr -> t structure ptr
+  val validate: Store.s -> Byte.Vec.s -> bool
+  val new_: Store.s -> Byte.Vec.s -> s
+  val new_unsafe: Store.s -> Byte.Vec.s -> s
   
-  val validate: Store.t structure ptr -> Byte.Vec.t structure ptr -> bool
+  val imports: s -> Importtype.Vec.s -> unit
+  val exports: s -> Importtype.Vec.s -> unit
   
-  val imports: t structure ptr -> Importtype.Vec.t structure ptr -> unit
-  val exports: t structure ptr -> Importtype.Vec.t structure ptr -> unit
-  
-  val serialize: t structure ptr -> Byte.Vec.t structure ptr -> unit
-  val deserialize: Store.t structure ptr -> Byte.Vec.t structure ptr -> t structure ptr
+  val serialize: s -> Byte.Vec.s -> unit
+  val deserialize: Store.s -> Byte.Vec.s -> s
+  val deserialize_unsafe: Store.s -> Byte.Vec.s -> s
 end;;
 
 module Func_T: StructType;;
 module Func : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Func_T) end
   
   type callback_t =
     Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr
@@ -364,116 +471,112 @@ module Func : sig
   val callback_t: callback_t typ
   val callback_with_env_t: callback_with_env_t typ
   
-  (** Callbacks need to be stored somewhere so it does not get GC'd *)
-  val new_: Store.t structure ptr -> Functype.t structure ptr -> callback_t -> t structure ptr
+  (** Callbacks need to be stored somewhere so they do not get GC'd *)
+  val new_: Store.s -> Functype.s -> callback_t -> s
+  val new_unsafe: Store.s -> Functype.s -> callback_t -> s
   val new_with_env:
-    Store.t structure ptr -> Functype.t structure ptr -> callback_with_env_t
-     -> unit ptr -> (unit ptr -> unit) -> t structure ptr
+    Store.s -> Functype.s -> callback_with_env_t -> unit ptr -> (unit ptr -> unit) -> s
+  val new_with_env_unsafe:
+    Store.s -> Functype.s -> callback_with_env_t -> unit ptr -> (unit ptr -> unit) -> s
   
-  val type_: t structure ptr -> Functype.t structure ptr
-  val param_arity: t structure ptr -> Unsigned.size_t
-  val result_arity: t structure ptr -> Unsigned.size_t
+  val type_: s -> Functype.s
+  val param_arity: s -> int
+  val result_arity: s -> int
   
-  val call:
-    t structure ptr -> Val.Vec.t structure ptr -> Val.Vec.t structure ptr
-     -> Trap.t structure ptr
+  val call: s -> Val.Vec.s -> Val.Vec.s -> Trap.s option
+  val call_unsafe: s -> Val.Vec.s -> Val.Vec.s -> Trap.s
 end;;
 
 module Global_T: StructType;;
 module Global : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Global_T) end
   
-  val new_:
-    Store.t structure ptr -> Globaltype.t structure ptr -> Val.t structure ptr
-     -> t structure ptr
+  val new_: Store.s -> Globaltype.s -> Val.s -> s
+  val new_unsafe: Store.s -> Globaltype.s -> Val.s -> s
   
-  val type_: t structure ptr -> Globaltype.t structure ptr
+  val type_: s -> Globaltype.s
   
-  val get: t structure ptr -> Val.t structure ptr -> unit
-  val set: t structure ptr -> Val.t structure ptr -> unit
+  val get: s -> Val.s -> unit
+  val set: s -> Val.s -> unit
 end;;
 
 module Table_T: StructType;;
 module Table : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Table_T) end
   
   type size_t = Unsigned.uint32
   val size_t: size_t typ
   
-  val new_:
-    Store.t structure ptr -> Tabletype.t structure ptr -> Ref.t structure ptr -> t structure ptr
+  val new_: Store.s -> Tabletype.s -> Ref.s -> s
+  val new_unsafe: Store.s -> Tabletype.s -> Ref.s -> s
   
-  val type_: t structure ptr -> Tabletype.t structure ptr
+  val type_: s -> Tabletype.s
   
-  val get: t structure ptr -> size_t -> Ref.t structure ptr
-  val set: t structure ptr -> size_t -> Ref.t structure ptr -> bool
+  val get: s -> int -> Ref.s
+  val set: s -> int -> Ref.s -> bool
   
-  val size: t structure ptr -> size_t
-  val grow: t structure ptr -> size_t -> Ref.t structure ptr -> bool
+  val size: s -> int
+  val grow: s -> int -> Ref.s -> bool
 end;;
 
 module Memory_T: StructType;;
 module Memory : sig
-  include DECLARE_TYPE
+  include module type of struct include DeclareType(Memory_T) end
   
   type pages_t = Unsigned.uint32
   val pages_t: pages_t typ
+  
   val page_size: int
   
-  val new_:
-    Store.t structure ptr -> Memorytype.t structure ptr -> t structure ptr
+  val new_: Store.s -> Memorytype.s -> s
+  val new_unsafe: Store.s -> Memorytype.s -> s
   
-  val type_: t structure ptr -> Memorytype.t structure ptr
+  val type_: s -> Memorytype.s
   
-  val data: t structure ptr -> Byte.byte ptr
-  val data_size: t structure ptr -> Unsigned.size_t
+  val data: s -> Byte.byte ptr
+  val data_size: s -> int
   
-  val size: t structure ptr -> pages_t
-  val grow: t structure ptr -> pages_t -> bool
+  val size: s -> int
+  val grow: s -> int -> bool
 end;;
 
 module Extern_T: StructType;;
 module Extern : sig
-  include DECLARE_TYPE
-  module V : sig
-    type data_type = t structure ptr
-    val data_type: data_type typ
-    val name: string
-  end
-  module Vec : DECLARE_VEC(V).T
+  include module type of struct include DeclareType(Extern_T) end
+  module V: VectorType with type data_type = t structure ptr with type owning_struct = s
+  module Vec: module type of struct include DeclareVec(V) end
   
-  val kind: t structure ptr -> Externkind.externkind_OCaml
-  val type_: t structure ptr -> Externtype.t structure ptr
+  val kind: s -> Externkind.ocaml
+  val type_: s -> Externtype.s
   
-  val of_func: Func.t structure ptr -> t structure ptr
-  val of_global: Global.t structure ptr -> t structure ptr
-  val of_table: Table.t structure ptr -> t structure ptr
-  val of_memory: Memory.t structure ptr -> t structure ptr
+  val of_func: Func.s -> s
+  val of_global: Global.s -> s
+  val of_table: Table.s -> s
+  val of_memory: Memory.s -> s
   
-  val to_func: t structure ptr -> Func.t structure ptr
-  val to_global: t structure ptr -> Global.t structure ptr
-  val to_table: t structure ptr -> Table.t structure ptr
-  val to_memory: t structure ptr -> Memory.t structure ptr
+  val to_func: s -> Func.s
+  val to_global: s -> Global.s
+  val to_table: s -> Table.s
+  val to_memory: s -> Memory.s
   
-  val of_func_const: Func.t structure ptr -> t structure ptr
-  val of_global_const: Global.t structure ptr -> t structure ptr
-  val of_table_const: Table.t structure ptr -> t structure ptr
-  val of_memory_const: Memory.t structure ptr -> t structure ptr
+  val of_func_const: Func.s -> s
+  val of_global_const: Global.s -> s
+  val of_table_const: Table.s -> s
+  val of_memory_const: Memory.s -> s
   
-  val to_func_const: t structure ptr -> Func.t structure ptr
-  val to_global_const: t structure ptr -> Global.t structure ptr
-  val to_table_const: t structure ptr -> Table.t structure ptr
-  val to_memory_const: t structure ptr -> Memory.t structure ptr
+  val to_func_const: s -> Func.s
+  val to_global_const: s -> Global.s
+  val to_table_const: s -> Table.s
+  val to_memory_const: s -> Memory.s
 end;;
 
 module Instance_T: StructType;;
 module Instance : sig
-  include DECLARE_REF
+  include module type of struct include DeclareRef(Instance_T) end
   
-  val new_:
-    Store.t structure ptr -> Module.t structure ptr -> Extern.Vec.t structure ptr
-     -> Trap.t structure ptr ptr -> t structure ptr
+  val new_: Store.s -> Module.s -> Extern.Vec.s -> (s, Trap.s option) result
+  val new_unsafe: Store.s -> Module.s -> Extern.Vec.s -> (s, Trap.s) result
   
-  val exports: t structure ptr -> Extern.Vec.t structure ptr -> unit
+  val exports: s -> Extern.Vec.s -> unit
 end;;
-val frame_instance: Frame.t structure ptr -> Instance.t structure ptr;;
+val frame_instance: Frame.s -> Instance.s;;

@@ -2,6 +2,12 @@ open Ctypes;;
 open Wasmer_ocaml.WasmerBindings;;
 open Wasmer_ocaml.Util;;
 
+(* The API prevents deleting a vector if its ownership has been taken away.
+   Thus, a call to Imports.delete imports, after the instance has been created,
+    is approximately equivalent to a no-op.
+   If you try to use a deleted object, the API will throw an
+    `Invalid_access "..."` exception. *)
+
 let () =
   print_endline "Generating the wasm module...";
   let wasm = wasm_of_wat
@@ -19,56 +25,48 @@ let () =
   
   print_endline "Validating the module...";
   if not (Module.validate store wasm) then
-    (print_endline "> Error validating the module!"; failwith "Invalid module!")
-  else begin
-    print_endline "Compiling the module...";
-    let module_ = Module.new_ store wasm in
-    if is_null module_ then
-      (print_endline "> Error compiling the module!"; failwith "Invalid module!")
-    else begin
-      Byte.Vec.delete wasm;
-      
-      print_endline "Creating imports...";
-      let imports = Extern.Vec.make_empty_null () in
-      
-      print_endline "Instanciating the module...";
-      let instance = Instance.new_ store module_ imports (from_voidp (ptr Trap.t) null) in
-      if is_null instance then
-        (print_endline "> Error instanciating the module!"; failwith "Invalid module!")
-      else begin
-        print_endline "Retrieving exports...";
-        let exports = Extern.Vec.make () in
-        Instance.exports instance exports;
-        
-        if (Unsigned.Size_t.to_int (!@ (exports |-> Extern.Vec.fsize)) = 0) then
-          (print_endline "> Error accessing exports!"; failwith "Invalid module!")
-        else begin
-          let add_one_f = Extern.to_func (!@ !@ (exports |-> Extern.Vec.fdata)) in
-          if is_null add_one_f then
-            (print_endline "> Error instanciating the module!"; failwith "Invalid module!")
-          else begin
-            Module.delete module_;
-            Instance.delete instance;
-            
-            print_endline "Calling the `add_one` function...";
-            let arg = Val.of_i32 1l in
-            let args = Val.Vec.of_list [arg] in
-            let results = Val.Vec.make_uninit 1 in
-            
-            if not (is_null (Func.call add_one_f args results)) then
-              (print_endline "> Error calling the function!"; failwith "Invalid function!")
-            else begin
-              print_endline ("Result of `add_one`: " ^
-                (Int32.to_string
-                 (!@
-                  (!@ (results |-> Val.Vec.fdata) |-> Val.fof |-> Val.Anon0.fi32))));
-              
-              Extern.Vec.delete exports;
-              Store.delete store;
-              Engine.delete engine
-            end
-          end
-        end
-      end
-    end
-  end;;
+    (print_endline "> Error validating the module!"; failwith "Invalid module!");
+  
+  print_endline "Compiling the module...";
+  let module_ = Module.new_unsafe store wasm in
+  if Module.is_null module_ then
+    (print_endline "> Error compiling the module!"; failwith "Invalid module!");
+  Byte.Vec.delete wasm;
+  
+  print_endline "Creating imports...";
+  let imports = Extern.Vec.make_empty_null () in
+  
+  print_endline "Instanciating the module...";
+  match Instance.new_ store module_ imports with
+  | Error _ -> print_endline "> Error instanciating the module!"; failwith "Invalid module!"
+  | Ok instance ->
+  print_endline "Retrieving exports...";
+  let exports = Extern.Vec.make_new () in
+  Instance.exports instance exports;
+  
+  if (Extern.Vec.get_size exports = 0) then
+    (print_endline "> Error accessing exports!"; failwith "Invalid module!");
+  let add_one_f = Extern.to_func (Extern.Vec.get_element_unsafe exports 0) in
+  if Func.is_null add_one_f then
+    (print_endline "> Error instanciating the module!"; failwith "Invalid module!");
+  
+  Instance.delete instance;
+  Module.delete module_;
+  
+  print_endline "Calling the `add_one` function...";
+  let arg = Val.of_i32 1l in
+  let args = Val.Vec.of_list [arg] in
+  let results = Val.Vec.make_uninit 1 in
+  
+  match Func.call add_one_f args results with
+  | Some _ -> print_endline "> Error calling the function!"; failwith "Invalid function!"
+  | None ->
+  print_endline ("Result of `add_one`: " ^
+    (Int32.to_string (Val.get_i32 (Val.Vec.get_element_unsafe results 0))));
+  
+  Func.delete add_one_f;
+  Val.Vec.delete args; (* Also frees arg (Val.delete arg is a noop) *)
+  Val.Vec.delete results;
+  Extern.Vec.delete exports;
+  Store.delete store;
+  Engine.delete engine;;

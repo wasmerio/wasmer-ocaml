@@ -29,7 +29,7 @@ TESTS:=test/instance/instance test/hello/hello
 
 all: wasmer_ocaml $(TESTS)
 
-wasmer_ocaml: lib/Wasmer_ocaml.cmxs lib/Wasmer_ocaml.cmxa
+wasmer_ocaml: lib/Wasmer_ocaml.cmxs lib/Wasmer_ocaml.cmxa lib/Wasmer_ocaml.cma
 .PHONY: wasmer_ocaml
 
 obj/lib/Wasmer_ocaml.ml: src/lib/wasmer_ocaml.ml
@@ -92,7 +92,7 @@ obj/lib/Wasmer_ocaml__Util.cmi: obj/lib/Wasmer_ocaml__Util.mli obj/lib/Wasmer_oc
 		-o obj/lib/Wasmer_ocaml__Util.cmi \
 		obj/lib/Wasmer_ocaml__Util.mli
 
-obj/lib/Wasmer_ocaml__Util.cmo: obj/lib/Wasmer_ocaml__Util.ml obj/lib/Wasmer_ocaml__WasmerBindings.cmo
+obj/lib/Wasmer_ocaml__Util.cmo: obj/lib/Wasmer_ocaml__Util.ml obj/lib/Wasmer_ocaml__Util.cmi obj/lib/Wasmer_ocaml__WasmerBindings.cmo
 	@echo "Compiling the Wasmer_ocaml.Util cmo"
 	$(SILENCER)$(OCAMLC) \
 		$(OCAMLFLAGS) \
@@ -103,7 +103,7 @@ obj/lib/Wasmer_ocaml__Util.cmo: obj/lib/Wasmer_ocaml__Util.ml obj/lib/Wasmer_oca
 		-o obj/lib/Wasmer_ocaml__Util.cmo \
 		-c obj/lib/Wasmer_ocaml__Util.ml
 
-obj/lib/Wasmer_ocaml__Util.cmx: obj/lib/Wasmer_ocaml__Util.ml obj/lib/Wasmer_ocaml__WasmerBindings.cmx
+obj/lib/Wasmer_ocaml__Util.cmx: obj/lib/Wasmer_ocaml__Util.ml obj/lib/Wasmer_ocaml__Util.cmi obj/lib/Wasmer_ocaml__WasmerBindings.cmx
 	@echo "Compiling the Wasmer_ocaml.Util cmx"
 	$(SILENCER)$(OCAMLOPT) \
 		$(OCAMLFLAGS) \
