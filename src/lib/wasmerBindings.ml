@@ -1,105 +1,233 @@
+(** This module contains all bindings.
+    Currently, only bindings to functions in wasm.h have been implemented. *)
+
 open Ctypes;;
 open Foreign;;
 
 let () =
   foreign "assertions" (void @-> returning void) ();;
 
+(** A C function returned NULL where a non-null value was required *)
 exception Returned_null of string;;
+(** A pointer was accessed but its ownership realtive to the caller was not
+    high enough.
+    For example, trying to get a pointer using get_ptr while the pointer was
+    given away will raise this exception. *)
 exception Invalid_access of string;;
 
+(** This is the update function.
+    @see {!const:object_state.State_Dependent} *)
+type 'a dependent_update_func = 'a -> unit;; (* Not part of the public API *)
+
+(** The state of the ownership of the pointed-to object *)
 type object_state =
-  | State_Owned
-  | State_Const
-  | State_Dependent of ((unit -> object_state) * (object_state -> unit))
-  | State_PassedAway;;
+  | State_Owned (** The object is owned by the caller *)
+  | State_RW (** The object is accessible by the caller *)
+  | State_Const (** The object is accessible by the caller in read-only *)
+  | State_Dependent of ((unit -> object_state) * object_state dependent_update_func)
+    (** The object's state depends on another.
+        The first function is to get the current state, the second function
+        updates it. *)
+  | State_PassedAway;; (** The current pointer has been given away. *)
+
+(** Gets the real state of the object_state. This is the same as [st] if [st]
+    is not [State_Dependent _], but also follows the function. *)
 let rec get_real_state st = match st with
   | State_Dependent (f, _) -> get_real_state (f ())
   | State_Owned
+  | State_RW
   | State_Const
   | State_PassedAway -> st;;
+(** Gets the real state of the object_state, and reduces the ownership to
+    read-only if needed. This is the same as [get_real_state st] if the result
+    is not [State_Owned], and is [State_Const] otherwise. *)
 let rec max_state_const st = match st with
   | State_Dependent (f, _) -> max_state_const (f ())
   | State_Owned
+  | State_RW
   | State_Const -> State_Const
   | State_PassedAway -> State_PassedAway;;
 
+(** The metadata type for ownable objects *)
 module type ObjectType = sig
+  (** The owned type *)
   type t
-  val make: unit -> t ptr (** Not part of the public API *)
-  val delete: t ptr -> unit (** Not part of the public API *)
+  (** Additional data that need to hold for the same length as the object *)
+  type d
+  (** Creates a new pointer.
+      @see {!val:OwnableObject.make_new} *)
+  val make: unit -> t ptr (* Not part of the public API *)
+  (** Deletes a pointer.
+      The ownership is guaranteed to be [State_Owned]. *)
+  val delete: t ptr -> unit (* Not part of the public API *)
 end;;
+(** The metadata type for structure-declaring objects *)
 module type StructType = sig
+  (** The structure base name (without the [wasm_] prefix and [_t] suffix) *)
   val name: string
+  (** Additional data that need to hold for the same length as the structure *)
+  type d
 end;;
+(** The metadata type for vector structures *)
 module type VectorType = sig
   type data_type
   val data_type: data_type typ
   
+  (** The structure base name (without the [wasm_] prefix and [_vec_t] suffix) *)
   val name: string
   
+  (** Vectors take ownership of their elements if possible. *)
   type owning_struct
+  (** Take away the ownership *)
   val grab_ownership: owning_struct -> data_type
+  (** Transform an element of the vector back to a pointer,
+      which ownership is dependent
+      @param obj The element
+      @param arg The ownership callbacks
+      @return The new owning structure *)
   val to_dependent:
-    data_type -> (unit -> object_state) * (object_state -> unit) -> owning_struct
+    data_type -> (unit -> object_state) * object_state dependent_update_func -> owning_struct
 end;;
 
+(** The API for ownable objects. This depends on an ObjectType. *)
 module OWNABLE_OBJECT(O: ObjectType) = struct
   module type T = sig
+    (** The owning structure type *)
     type s
     
-    val make_new_st: object_state -> s (** Not part of the public API *)
+    (** Make a new owning structure from a new pointer.
+        @param st The initial pointer state *)
+    val make_new_st: object_state -> s (* Not part of the public API *)
+    (** Make a new owning structure from a new pointer.
+        Equivalent to [make_new_st State_Owned] (but available in the public API). *)
     val make_new: unit -> s
+    (** Make a new owning structure from a pointer.
+        @param ptr The raw pointer
+        @param st The current ownership state
+        @return The new ownership structure
+        @raise Returned_null If the pointer is NULL
+        @see {!val:OwnableObject.make_from_unsafe} *)
     val make_from_raise: O.t ptr -> object_state -> s
+    (** Make a new owning structure from a pointer.
+        Does not raise an exception if NULL is given.
+        @param ptr The raw pointer
+        @param st The current ownership state
+        @return The new ownership structure
+        @see {!val:OwnableObject.make_from_unsafe} *)
     val make_from_unsafe: O.t ptr -> object_state -> s
+    (** Make a new owning structure from a pointer, with an additional data.
+        @param ptr The raw pointer
+        @param st The current ownership state
+        @param d The additional data
+        @return The new ownership structure
+        @raise Returned_null If the pointer is NULL
+        @see {!val:OwnableObject.make_from_unsafe} *)
+    val make_from_raise_data: O.t ptr -> object_state -> O.d -> s
+    (** Make a new owning structure from a pointer, with an additional data.
+        Does not raise an exception if NULL is given.
+        @param ptr The raw pointer
+        @param st The current ownership state
+        @param d The additional data
+        @return The new ownership structure
+        @see {!val:OwnableObject.make_from_unsafe} *)
+    val make_from_unsafe_data: O.t ptr -> object_state -> O.d -> s
     
     (* Set -- discards Dependent, ignore ownership hierarchy (own > const > passed away)
        Update -- updates Dependent, crash if ownership increases *)
-    val set_state: s -> object_state -> unit (** Not part of the public API *)
-    val update_state: s -> object_state -> unit (** Not part of the public API *)
+    (** Override the current state of the pointer.
+        Ignores the updator if the current state is [State_Dependent _]. *)
+    val set_state: s -> object_state -> unit (* Not part of the public API *)
+    (** Updates the current state of the pointer.
+        Updates through the updator if the current state is [State_Dependent _]. *)
+    val update_state: s -> object_state -> unit (* Not part of the public API *)
     
+    (** Returns the current ownership state. *)
     val get_state: s -> object_state
+    (** Sets the current ownership state to {!const:object_state.State_GivenAway}.
+        Ignores the current ownership. *)
     val lose_ownership: s -> unit
-    (** Give the ownership of this to the caller
-        Equivalent to (let p = get_ptr <s> in lose_ownership <s>; p) *)
+    (** Gives the ownership of the pointed object to the caller code.
+        Equivalent to [let p = get_ptr self in lose_ownership self; p],
+        but with additional checks for the current ownership.
+        @return The pointer *)
     val grab_ownership: s -> O.t ptr
-    (** Delete then give a given-away pointer (own-out parameters in the C API) *)
+    (** Deletes the object if required, then sets the ownership to
+        {!const:object_state.State_Owned} and returns the pointer.
+        This is only to be used in own-out function arguments
+        in the C API or equivalent.
+        @return A deleted or given-away pointer
+        @raise Invalid_access If the current state is
+        {!const:object_state.State_Dependent} *)
     val gain_ownership_back: s -> O.t ptr
     
+    (** Returns [Ctypes.is_null] on the underlying pointer, ignoring the current
+        ownership state. *)
     val is_null: s -> bool
+    (** Returns the underlying pointer, requiring a sufficient
+        ownership state.
+        @raise Invalid_access If the current state is lower than
+        {!const:object_state.State_Owned}  *)
     val get_ptr: s -> O.t ptr
+    (** Returns the underlying pointer, requiring a sufficient
+        ownership state.
+        @raise Invalid_access If the current state is lower than
+        {!const:object_state.State_Const}  *)
     val get_ptr_const: s -> O.t ptr
-    (** Inherently unsafe (fails if the pointer is not given away) *)
+    (** Inherently unsafe function that returns a given-away pointer.
+        @raise Invalid_access If the current state is not
+        {!const:object_state.State_GivenAway} *)
     val get_ptr_givenaway: s -> O.t ptr
     
+    (** Frees the underlying pointer.
+        A side effect is to mark the object as given away. *)
     val delete: s -> unit
   end
 end;;
 
+(** The implementation for ownable objects *)
 module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
-  type s = { p: O.t ptr; mutable state: object_state };;
+  type s = { p: O.t ptr; mutable state: object_state; d: O.d option };;
   
-  let make_new_st st = { p = O.make (); state = st }
-  let make_new () = { p = O.make (); state = State_PassedAway }
+  let delete self = match self.state with
+    | State_Dependent _ -> () (* The object doesn't own this *)
+    | State_Owned -> O.delete self.p; self.state <- State_PassedAway
+    | State_RW -> () (* The C API is unclear here, so do nothing to be safe *)
+    | State_Const -> () (* The C API is unclear here, so do nothing to be safe *)
+    | State_PassedAway -> ()
+  
+  (** Registers [self] to be deleted *)
+  let register self = Gc.finalise delete self; self
+  let make_new_st st = register { p = O.make (); state = st; d = None }
+  let make_new () = register { p = O.make (); state = State_PassedAway; d = None }
   let make_from_raise p st =
     if is_null p then invalid_arg "cannot create an owned object from NULL"
-    else { p = p; state = st }
-  let make_from_unsafe p st = { p = p; state = st }
+    else register { p = p; state = st; d = None }
+  let make_from_unsafe p st = register { p = p; state = st; d = None }
+  let make_from_raise_data p st d =
+    if is_null p then invalid_arg "cannot create an owned object from NULL"
+    else register { p = p; state = st; d = Some d }
+  let make_from_unsafe_data p st d = register { p = p; state = st; d = Some d }
   
   let set_state self st = self.state <- st
   let update_state self st = match self.state with
     | State_Dependent (_, up) -> up st
     | State_Owned -> self.state <- st
+    | State_RW ->
+      if st = State_Owned then invalid_arg "update_state does not increase ownership"
+      else self.state <- st
     | State_Const ->
-      if st = State_Owned then invalid_arg "update_state increases ownership"
+      if (st = State_Owned) || (st = State_RW) then
+        invalid_arg "update_state does not increase ownership"
       else self.state <- st
     | State_PassedAway ->
       if st = State_PassedAway then self.state <- st
-      else invalid_arg "update_state increases ownership"
+      else invalid_arg "update_state does not increase ownership"
   
   let get_state { state; _ } = state
   let lose_ownership self = self.state <- State_PassedAway
   let grab_ownership self = match self.state with
     | State_Owned -> self.state <- State_PassedAway; self.p
+    | State_RW -> raise (Invalid_access "grab_ownership { state = State_RW }")
     | State_Const -> raise (Invalid_access "grab_ownership { state = State_Const }")
     | State_PassedAway ->
       raise (Invalid_access "grab_ownership { state = State_PassedAway }")
@@ -114,11 +242,13 @@ module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
   let is_null { p; _ } = is_null p
   let get_ptr { p; state; _ } = match get_real_state state with
     | State_Owned -> p
+    | State_RW -> p
     | State_Const -> raise (Invalid_access "get_ptr { state = ..State_Const }")
     | State_PassedAway -> raise (Invalid_access "get_ptr { state = ..State_PassedAway }")
     | State_Dependent _ -> failwith "unreachable (real_state = Dependent)"
   let get_ptr_const { p; state; _ } = match get_real_state state with
     | State_Owned -> p
+    | State_RW -> p
     | State_Const -> p
     | State_PassedAway ->
       raise (Invalid_access "get_ptr_const { state = ..State_PassedAway }")
@@ -127,27 +257,31 @@ module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
     | State_PassedAway -> p
     | State_Owned ->
       raise (Invalid_access "get_ptr_givenaway { state = ..State_Owned }")
+    | State_RW ->
+      raise (Invalid_access "get_ptr_givenaway { state = ..State_RW }")
     | State_Const ->
       raise (Invalid_access "get_ptr_givenaway { state = ..State_Const }")
     | State_Dependent _ -> failwith "unreachable (real_state = Dependent)"
-  
-  let delete self = match self.state with
-    | State_Dependent _ -> () (* The object doesn't own this *)
-    | State_Owned -> O.delete self.p; self.state <- State_PassedAway
-    | State_Const -> () (* The C API is unclear here, so do nothing to be safe *)
-    | State_PassedAway -> ()
 end;;
 
-module type DECLARE_OWN = sig
-  val name: string
-  type t
-  val t: t structure typ
-  
-  module O: ObjectType with type t = t structure
-  include module type of struct include OwnableObject(O) end
+(** The API for DeclareOwn
+    @see 'wasm.h' The OCaml implementation for the [WASM_DECLARE_OWN] macro *)
+module DECLARE_OWN(S: StructType) = struct
+  module type T = sig
+    (** The structure name *)
+    val name: string
+    (** The structure type (undefined) *)
+    type t
+    (** The structure type (CTypes type) *)
+    val t: t structure typ
+    
+    module O: ObjectType with type t = t structure with type d = S.d
+    include module type of struct include OwnableObject(O) end
+  end
 end;;
 
-module DeclareOwn(T: StructType) : DECLARE_OWN = struct
+(** The implementation for DeclareOwn structures *)
+module DeclareOwn(T: StructType) : DECLARE_OWN(T).T = struct
   let name = "wasm_" ^ T.name
   
   type t
@@ -156,6 +290,8 @@ module DeclareOwn(T: StructType) : DECLARE_OWN = struct
   type t_bis = t
   module O = struct
     type t = t_bis structure
+    type d = T.d
+    
     let make () = addr (make t)
     let delete = foreign ~stub:true (name ^ "_delete") (ptr t @-> returning void)
   end
@@ -174,19 +310,19 @@ module DECLARE_VEC(U: VectorType) = struct
     val fsize: (Unsigned.size_t, t structure) field
     val fdata: (data_type ptr, t structure) field
     
-    module O : ObjectType with type t = t structure
+    module O : ObjectType with type t = t structure with type d = unit
     include module type of struct include OwnableObject(O) end
     
     val make_empty: unit -> s
-    val make_empty_null: unit -> s (** Initializes the data field to NULL *)
+    val make_empty_null: unit -> s (* Initializes the data field to NULL *)
     val make_uninit: int -> s
     (*val new_empty: s -> unit
-    val new_empty_null: s -> unit (** Initializes the data field to NULL *)
+    val new_empty_null: s -> unit (* Initializes the data field to NULL *)
     val new_uninit: s -> int -> unit*)
     
     val duplicate: s -> s
     
-    (** The vector always get ownership of the data *)
+    (* The vector always get ownership of the data *)
     val of_array: U.owning_struct array -> s
     val of_list: U.owning_struct list -> s
     
@@ -215,6 +351,8 @@ module DeclareVec(T: VectorType) : DECLARE_VEC(T).T = struct
   type t_bis = t
   module O = struct
     type t = t_bis structure
+    type d = unit
+    
     let make () = addr (make t)
     let delete = foreign ~stub:true (name ^ "_delete") (ptr t @-> returning void)
   end
@@ -296,7 +434,7 @@ module DECLARE_TYPE(T: StructType) = struct
       type owning_struct = s
       val grab_ownership: owning_struct -> data_type
       val to_dependent:
-        data_type -> (unit -> object_state) * (object_state -> unit) -> owning_struct
+        data_type -> (unit -> object_state) * object_state dependent_update_func -> owning_struct
     end
     module Vec: module type of DeclareVec(V)
     
@@ -310,6 +448,7 @@ module DeclareType(T: StructType) : DECLARE_TYPE(T).T = struct
   module V = struct
     type data_type = t structure ptr
     let data_type = ptr t
+    
     let name = T.name
     
     type owning_struct = s
@@ -386,6 +525,7 @@ end;;
 
 module Ref_T = struct
   let name = "ref"
+  type d = unit
 end;;
 module Ref = DeclareRefBase(Ref_T);;
 
@@ -439,12 +579,22 @@ module Byte = struct
     let of_char_list l = of_list (List.map (fun i -> Unsigned.UInt8.of_int (Char.code i)) l)
     let of_int_list l = of_list (List.map (fun i -> Unsigned.UInt8.of_int i) l)
     let of_bytes b = of_char_list (List.of_seq (Bytes.to_seq b))
+    let to_char_list self =
+      List.init (get_size self)
+      (fun i -> Char.chr (Unsigned.UInt8.to_int (get_element_const_unsafe self i)))
+    let to_int_list self =
+      List.init (get_size self)
+      (fun i -> Unsigned.UInt8.to_int (get_element_const_unsafe self i))
+    let to_bytes self =
+      Bytes.init (get_size self)
+        (fun i -> Char.chr (Unsigned.UInt8.to_int (get_element_const_unsafe self i)))
   end
 end;;
 module Name = struct
   include Byte.Vec
   
   let of_string s = of_bytes (Bytes.of_string s)
+  let to_string self = Bytes.unsafe_to_string (to_bytes self)
 end;;
 module Message = struct
   include Name
@@ -452,6 +602,7 @@ end;;
 
 module Config_T = struct
   let name = "config"
+  type d = unit
 end;;
 (** Embedders may provide custom functions for manipulating configs. *)
 module Config = struct
@@ -469,6 +620,7 @@ end;;
 
 module Engine_T = struct
   let name = "engine"
+  type d = unit
 end;;
 module Engine = struct
   include DeclareOwn(Engine_T)
@@ -488,6 +640,7 @@ end;;
 
 module Store_T = struct
   let name = "store"
+  type d = unit
 end;;
 module Store = struct
   include DeclareOwn(Store_T)
@@ -566,6 +719,7 @@ end;;
 
 module Valtype_T = struct
   let name = "valtype"
+  type d = unit
 end;;
 module Valtype = struct
   include DeclareType(Valtype_T)
@@ -587,6 +741,7 @@ end;;
 
 module Functype_T = struct
   let name = "functype"
+  type d = unit
 end;;
 module Functype = struct
   include DeclareType(Functype_T)
@@ -616,6 +771,7 @@ end;;
 
 module Globaltype_T = struct
   let name = "globaltype"
+  type d = unit
 end;;
 module Globaltype = struct
   include DeclareType(Globaltype_T)
@@ -645,6 +801,7 @@ end;;
 
 module Tabletype_T = struct
   let name = "tabletype"
+  type d = unit
 end;;
 module Tabletype = struct
   include DeclareType(Tabletype_T)
@@ -671,6 +828,7 @@ end;;
 
 module Memorytype_T = struct
   let name = "memorytype"
+  type d = unit
 end;;
 module Memorytype = struct
   include DeclareType(Memorytype_T)
@@ -714,6 +872,7 @@ end;;
 
 module Externtype_T = struct
   let name = "externtype"
+  type d = unit
 end;;
 module Externtype = struct
   include DeclareType(Externtype_T)
@@ -847,6 +1006,7 @@ end;;
 
 module Importtype_T = struct
   let name = "importtype"
+  type d = unit
 end;;
 module Importtype = struct
   include DeclareType(Importtype_T)
@@ -881,6 +1041,7 @@ end;;
 
 module Exporttype_T = struct
   let name = "exporttype"
+  type d = unit
 end;;
 module Exporttype = struct
   include DeclareType(Exporttype_T)
@@ -927,6 +1088,8 @@ module Val = struct
   type t_bis = t
   module O = struct
     type t = t_bis structure
+    type d = unit
+    
     let make () = addr (make t)
     let delete = foreign ~stub:true "wasm_val_delete" (ptr t @-> returning void)
   end
@@ -1045,7 +1208,21 @@ module Val = struct
     let grab_ownership s = !@ (grab_ownership s)
     let to_dependent v f = make_from_unsafe (addr v) (State_Dependent f)
   end
-  module Vec = DeclareVec(V)
+  module Vec = struct
+    include DeclareVec(V)
+    
+    let is_compatible self valtypevec =
+      let len = get_size self in
+      if len <> Valtype.Vec.get_size valtypevec then false
+      else
+        let rec inner ptrself ptrvt i =
+          if i >= len then true
+          else if Valkind.of_c (!@ (ptrself |-> fkind)) <> Valtype.capi_kind (!@ ptrvt)
+            then false
+          else inner (ptrself +@ 1) (ptrvt +@ 1) (i + 1)
+        in inner (!@ ((get_ptr_const self) |-> fdata))
+          (!@ ((Valtype.Vec.get_ptr_const valtypevec) |-> Valtype.Vec.fdata)) 0
+  end
 end;;
 
 
@@ -1054,6 +1231,7 @@ module DECLARE_SHAREABLE_REF(T: StructType) = struct
     include module type of DeclareRef(T)
     module S : sig
       val name: string
+      type d = unit
     end
     module Shared : module type of DeclareOwn(S)
     
@@ -1066,6 +1244,7 @@ module DeclareShareableRef(T: StructType) : DECLARE_SHAREABLE_REF(T).T = struct
   include DeclareRef(T)
   module S = struct
     let name = "shared_" ^ T.name
+    type d = unit
   end
   module Shared = DeclareOwn(S)
   
@@ -1086,6 +1265,7 @@ end;;
 
 module Frame_T = struct
   let name = "frame"
+  type d = unit
 end
 module Frame = struct
   include DeclareOwn(Frame_T)
@@ -1129,6 +1309,7 @@ end;;
 
 module Trap_T = struct
   let name = "trap"
+  type d = unit
 end;;
 module Trap = struct
   include DeclareRef(Trap_T)
@@ -1168,6 +1349,7 @@ end;;
 
 module Foreign_T = struct
   let name = "foreign"
+  type d = unit
 end;;
 module Foreign = struct
   include DeclareRef(Foreign_T)
@@ -1183,6 +1365,7 @@ end;;
 
 module Module_T = struct
   let name = "module"
+  type d = unit
 end;;
 module Module = struct
   include DeclareShareableRef(Module_T)
@@ -1243,22 +1426,30 @@ end;;
 
 module Func_T = struct
   let name = "func"
+  type d =
+    | CallbackFunc of (Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr)
+    | CallbackEnvFunc of (unit ptr -> Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr)
 end;;
 module Func = struct
   include DeclareType(Func_T)
   
-  type callback_t =
+  type capi_callback_t =
     Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr
-  type callback_with_env_t =
-    unit ptr -> Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr
+  type capi_callback_with_env_t =
+    unit ptr -> Val.Vec.t structure ptr
+     -> Val.Vec.t structure ptr -> Trap.t structure ptr
   let callback_t =
     typedef
-      (funptr ~thread_registration:true (ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t)))
+      (funptr ~thread_registration:true
+       (ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t)))
       "wasm_func_callback_t"
   let callback_with_env_t =
     typedef
-      (funptr ~thread_registration:true (ptr void @-> ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t)))
+      (funptr ~thread_registration:true
+       (ptr void @-> ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t)))
       "wasm_func_callback_with_env_t"
+  type callback_t = Val.Vec.s -> Val.Vec.s -> Trap.s option
+  type callback_with_env_t = unit ptr -> Val.Vec.s -> Val.Vec.s -> Trap.s option
   
   let capi_new =
     foreign ~stub:true
@@ -1282,19 +1473,38 @@ module Func = struct
     foreign ~stub:true
       "wasm_func_call"
       (ptr t @-> ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t))
-
+  
+  let generate_callback cb = fun args rets ->
+    match cb (Val.Vec.make_from_unsafe args State_Const)
+      (Val.Vec.make_from_unsafe rets State_RW) with
+    | None -> from_voidp Trap.t null
+    | Some trap -> Trap.grab_ownership trap
+  let generate_callback_env cb = fun env args rets ->
+    match cb env (Val.Vec.make_from_unsafe args State_Const)
+      (Val.Vec.make_from_unsafe rets State_RW) with
+    | None -> from_voidp Trap.t null
+    | Some trap -> Trap.grab_ownership trap
+  
   let new_ store typ cb =
-    make_from_raise
-      (capi_new (Store.get_ptr store) (Functype.get_ptr typ) cb) State_Owned
+    let newcb = generate_callback cb in
+    make_from_raise_data
+      (capi_new (Store.get_ptr store) (Functype.get_ptr typ) newcb) State_Owned
+      (Func_T.CallbackFunc newcb)
   let new_unsafe store typ cb =
-    make_from_unsafe
-      (capi_new (Store.get_ptr store) (Functype.get_ptr typ) cb) State_Owned
+    let newcb = generate_callback cb in
+    make_from_unsafe_data
+      (capi_new (Store.get_ptr store) (Functype.get_ptr typ) newcb) State_Owned
+      (Func_T.CallbackFunc newcb)
   let new_with_env store typ cb env finalizer =
-    make_from_raise (capi_new_with_env
-      (Store.get_ptr store) (Functype.get_ptr typ) cb env finalizer) State_Owned
+    let newcb = generate_callback_env cb in
+    make_from_raise_data (capi_new_with_env
+      (Store.get_ptr store) (Functype.get_ptr typ) newcb env finalizer) State_Owned
+      (Func_T.CallbackEnvFunc newcb)
   let new_with_env_unsafe store typ cb env finalizer =
-    make_from_unsafe (capi_new_with_env
-      (Store.get_ptr store) (Functype.get_ptr typ) cb env finalizer) State_Owned
+    let newcb = generate_callback_env cb in
+    make_from_unsafe_data (capi_new_with_env
+      (Store.get_ptr store) (Functype.get_ptr typ) newcb env finalizer) State_Owned
+      (Func_T.CallbackEnvFunc newcb)
   
   let type_ self =
     Functype.make_from_raise (capi_type (get_ptr_const self)) State_Owned
@@ -1307,14 +1517,28 @@ module Func = struct
     Trap.make_from_unsafe (capi_call
       (get_ptr_const self) (Val.Vec.get_ptr_const args) (Val.Vec.get_ptr results))
       State_Owned
+  let compatible_vectors self args results =
+    let fparms, frets =
+      let funt = type_ self in
+      Functype.params funt, Functype.results funt in
+    if not (Val.Vec.is_compatible args fparms) then Error false
+    else if
+      let retl = Val.Vec.get_size results in
+      let reql = Valtype.Vec.get_size frets in
+      retl <> reql then Error true
+    else Ok ()
   let call self args results =
-    let ret = call_unsafe self args results in
-    if Trap.is_null ret then None
-    else Some ret
+    match compatible_vectors self args results with
+    | Error b -> invalid_arg
+        (if b then "Incompatible return vector" else "Incompatible arguments vector")
+    | Ok () -> let ret = call_unsafe self args results in
+      if Trap.is_null ret then None
+      else Some ret
 end;;
 
 module Global_T = struct
   let name = "global"
+  type d = unit
 end;;
 module Global = struct
   include DeclareType(Global_T)
@@ -1350,6 +1574,7 @@ end;;
 
 module Table_T = struct
   let name = "table"
+  type d = unit
 end;;
 module Table = struct
   include DeclareType(Table_T)
@@ -1403,6 +1628,7 @@ end;;
 
 module Memory_T = struct
   let name = "memory"
+  type d = unit
 end;;
 module Memory = struct
   include DeclareType(Memory_T)
@@ -1451,6 +1677,7 @@ end;;
 
 module Extern_T = struct
   let name = "extern"
+  type d = unit
 end;;
 module Extern = struct
   include DeclareType(Extern_T)
@@ -1599,6 +1826,7 @@ end;;
 
 module Instance_T = struct
   let name = "instance"
+  type d = unit
 end;;
 module Instance = struct
   include DeclareRef(Instance_T)

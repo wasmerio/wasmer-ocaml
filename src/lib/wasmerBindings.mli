@@ -3,21 +3,27 @@ open Ctypes;;
 exception Returned_null of string;;
 exception Invalid_access of string;;
 
+type 'a dependent_update_func
+
 type object_state =
   | State_Owned
+  | State_RW
   | State_Const
-  | State_Dependent of ((unit -> object_state) * (object_state -> unit))
+  | State_Dependent of ((unit -> object_state) * object_state dependent_update_func)
   | State_PassedAway;;
 val get_real_state: object_state -> object_state;;
 val max_state_const: object_state -> object_state;;
 
 module type ObjectType = sig
   type t
+  type d
+  
   val make: unit -> t ptr (** Not part of the public API: DO NOT USE *)
   val delete: t ptr -> unit (** Not part of the public API: DO NOT USE *)
 end;;
 module type StructType = sig
   val name: string
+  type d
 end;;
 module type VectorType = sig
   type data_type
@@ -28,7 +34,7 @@ module type VectorType = sig
   type owning_struct
   val grab_ownership: owning_struct -> data_type
   val to_dependent:
-    data_type -> (unit -> object_state) * (object_state -> unit) -> owning_struct
+    data_type -> (unit -> object_state) * object_state dependent_update_func -> owning_struct
 end;;
 
 module OwnableObject(O: ObjectType) : sig
@@ -111,7 +117,7 @@ module DeclareType(T: StructType) : sig
     type owning_struct = s
     val grab_ownership: owning_struct -> data_type
     val to_dependent:
-      data_type -> (unit -> object_state) * (object_state -> unit) -> owning_struct
+      data_type -> (unit -> object_state) * object_state dependent_update_func -> owning_struct
   end
   module Vec: module type of struct include DeclareVec(V) end
   
@@ -154,12 +160,16 @@ module Byte : sig
     val of_char_list: char list -> s
     val of_int_list: int list -> s
     val of_bytes: bytes -> s
+    val to_char_list: s -> char list
+    val to_int_list: s -> int list
+    val to_bytes: s -> bytes
   end
 end;;
 module Name : sig
   include module type of struct include Byte.Vec end
   
   val of_string: string -> s
+  val to_string: s -> string
 end;;
 module Message : sig
   include module type of struct include Name end
@@ -395,7 +405,11 @@ module Val : sig
   val duplicate: s -> s
   
   module V: VectorType with type data_type = t structure with type owning_struct = s
-  module Vec: module type of struct include DeclareVec(V) end
+  module Vec : sig
+    include module type of struct include DeclareVec(V) end
+    
+    val is_compatible: s -> Valtype.Vec.s -> bool
+  end
 end;;
 
 
@@ -464,12 +478,14 @@ module Func_T: StructType;;
 module Func : sig
   include module type of struct include DeclareType(Func_T) end
   
-  type callback_t =
+  type capi_callback_t =
     Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr
-  type callback_with_env_t =
+  type capi_callback_with_env_t =
     unit ptr -> Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr
-  val callback_t: callback_t typ
-  val callback_with_env_t: callback_with_env_t typ
+  val callback_t: capi_callback_t typ
+  val callback_with_env_t: capi_callback_with_env_t typ
+  type callback_t = Val.Vec.s -> Val.Vec.s -> Trap.s option
+  type callback_with_env_t = unit ptr -> Val.Vec.s -> Val.Vec.s -> Trap.s option
   
   (** Callbacks need to be stored somewhere so they do not get GC'd *)
   val new_: Store.s -> Functype.s -> callback_t -> s
@@ -483,6 +499,7 @@ module Func : sig
   val param_arity: s -> int
   val result_arity: s -> int
   
+  val compatible_vectors: s -> Val.Vec.s -> Val.Vec.s -> (unit, bool) result
   val call: s -> Val.Vec.s -> Val.Vec.s -> Trap.s option
   val call_unsafe: s -> Val.Vec.s -> Val.Vec.s -> Trap.s
 end;;

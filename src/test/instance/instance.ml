@@ -6,18 +6,20 @@ open Wasmer_ocaml.Util;;
    Thus, a call to Imports.delete imports, after the instance has been created,
     is approximately equivalent to a no-op.
    If you try to use a deleted object, the API will throw an
-    `Invalid_access "..."` exception. *)
+    `Invalid_access "..."` exception.
+   Lastly, the API registers a finaliser for every ownable object, so the
+    delete method is not required to be called. *)
 
 let () =
   print_endline "Generating the wasm module...";
   let wasm = wasm_of_wat
-    ("(module\n"
-    ^"  (type $add_one_t (func (param i32) (result i32)))\n"
-    ^"  (func $add_one_f (type $add_one_t) (param $value i32) (result i32)\n"
-    ^"    local.get $value\n"
-    ^"    i32.const 1\n"
-    ^"    i32.add)\n"
-    ^"  (export \"add_one\" (func $add_one_f)))") in
+  {|(module
+      (type $add_one_t (func (param i32) (result i32)))
+      (func $add_one_f (type $add_one_t) (param $value i32) (result i32)
+        local.get $value
+        i32.const 1
+        i32.add)
+      (export "add_one" (func $add_one_f)))|} in
   
   print_endline "Creating the store...";
   let engine = Engine.new_ () in
@@ -31,7 +33,6 @@ let () =
   let module_ = Module.new_unsafe store wasm in
   if Module.is_null module_ then
     (print_endline "> Error compiling the module!"; failwith "Invalid module!");
-  Byte.Vec.delete wasm;
   
   print_endline "Creating imports...";
   let imports = Extern.Vec.make_empty_null () in
@@ -50,9 +51,6 @@ let () =
   if Func.is_null add_one_f then
     (print_endline "> Error instanciating the module!"; failwith "Invalid module!");
   
-  Instance.delete instance;
-  Module.delete module_;
-  
   print_endline "Calling the `add_one` function...";
   let arg = Val.of_i32 1l in
   let args = Val.Vec.of_list [arg] in
@@ -62,11 +60,4 @@ let () =
   | Some _ -> print_endline "> Error calling the function!"; failwith "Invalid function!"
   | None ->
   print_endline ("Result of `add_one`: " ^
-    (Int32.to_string (Val.get_i32 (Val.Vec.get_element_unsafe results 0))));
-  
-  Func.delete add_one_f;
-  Val.Vec.delete args; (* Also frees arg (Val.delete arg is a noop) *)
-  Val.Vec.delete results;
-  Extern.Vec.delete exports;
-  Store.delete store;
-  Engine.delete engine;;
+    (Int32.to_string (Val.get_i32 (Val.Vec.get_element_unsafe results 0))));;
