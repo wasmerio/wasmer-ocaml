@@ -26,6 +26,7 @@ all:
 
 LIB_INTERFACE:=lib/Wasmer_ocaml.cmi lib/Wasmer_ocaml__WasmerBindings.cmi lib/Wasmer_ocaml__Util.cmi
 TESTS:=test/instance/instance test/hello/hello
+EXAMPLES:=examples/hello examples/instance
 
 all: wasmer_ocaml $(TESTS)
 
@@ -257,6 +258,76 @@ test/instance/instance: lib/Wasmer_ocaml.cmxa obj/test/instance/instance.cmx
 		lib/Wasmer_ocaml.cmxa \
 		obj/test/instance/instance.cmx
 
+obj/examples/hello.cmo: $(LIB_INTERFACE) examples/hello.ml
+	@echo "Compiling example 'hello' cmo"
+	$(SILENCER)$(OCAMLC) \
+		$(OCAMLFLAGS) \
+		$(INCLUDES) \
+		-I lib \
+		-no-alias-deps \
+		-o obj/examples/hello.cmo \
+		-c examples/hello.ml
+obj/examples/hello.cmx: $(LIB_INTERFACE) examples/hello.ml
+	@echo "Compiling example 'hello' cmx"
+	$(SILENCER)$(OCAMLOPT) \
+		$(OCAMLFLAGS) \
+		$(INCLUDES) \
+		-I lib \
+		-no-alias-deps \
+		-o obj/examples/hello.cmx \
+		-c examples/hello.ml
+
+examples/hello: lib/Wasmer_ocaml.cmxa obj/examples/hello.cmx
+	@echo "Compiling example 'hello'"
+	$(SILENCER)$(OCAMLOPT) \
+		$(OCAMLFLAGS) \
+		$(INCLUDES) \
+		-I lib \
+		-o examples/hello \
+		$(OPAM_SWITCH_PREFIX)/lib/bigarray-compat/bigarray_compat.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/integers/integers.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ocaml/unix.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ocaml/threads/threads.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes-foreign.cmxa \
+		lib/Wasmer_ocaml.cmxa \
+		obj/examples/hello.cmx
+
+obj/examples/instance.cmo: $(LIB_INTERFACE) examples/instance.ml
+	@echo "Compiling example 'instance' cmo"
+	$(SILENCER)$(OCAMLC) \
+		$(OCAMLFLAGS) \
+		$(INCLUDES) \
+		-I lib \
+		-no-alias-deps \
+		-o obj/examples/instance.cmo \
+		-c examples/instance.ml
+obj/examples/instance.cmx: $(LIB_INTERFACE) examples/instance.ml
+	@echo "Compiling example 'instance' cmx"
+	$(SILENCER)$(OCAMLOPT) \
+		$(OCAMLFLAGS) \
+		$(INCLUDES) \
+		-I lib \
+		-no-alias-deps \
+		-o obj/examples/instance.cmx \
+		-c examples/instance.ml
+
+examples/instance: lib/Wasmer_ocaml.cmxa obj/examples/instance.cmx
+	@echo "Compiling example 'instance'"
+	$(SILENCER)$(OCAMLOPT) \
+		$(OCAMLFLAGS) \
+		$(INCLUDES) \
+		-I lib \
+		-o examples/instance \
+		$(OPAM_SWITCH_PREFIX)/lib/bigarray-compat/bigarray_compat.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/integers/integers.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ocaml/unix.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ocaml/threads/threads.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes-foreign.cmxa \
+		lib/Wasmer_ocaml.cmxa \
+		obj/examples/instance.cmx
+
 # OCaml bug: the sigaltstack can't be changed by an external library
 # or the program will crash on exit
 # https://github.com/ocaml/ocaml/issues/11489
@@ -265,6 +336,12 @@ check: $(TESTS)
 	@echo "Reminder: segmentation fault errors when exiting are known and an OCaml bug."
 	-echo; echo Test: instance; cd test; cd instance; ./instance
 	-echo; echo Test: hello; cd test; cd hello; ./hello
+
+examples: $(EXAMPLES)
+	@echo "Reminder: segmentation fault errors when exiting are known and an OCaml bug."
+	-echo; echo Example: hello; cd examples; ./hello
+	-echo; echo Example: instance; cd examples; ./instance
+.PHONY: examples
 
 clean:
 # Output
@@ -276,4 +353,4 @@ clean:
 # Tests
 	$(RM) obj/test/hello/* obj/test/instance/*
 	$(SILENCER)touch obj/test/hello/.gitkeep obj/test/instance/.gitkeep
-	$(RM) $(TESTS)
+	$(RM) $(TESTS) $(EXAMPLES)

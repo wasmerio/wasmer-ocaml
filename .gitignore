@@ -2,6 +2,7 @@
 ## OCaml
 /obj/lib/*
 /obj/test/*/*
+/obj/examples/*
 /lib/*
 
 # Test executables
@@ -13,3 +14,9 @@
 
 # Tree
 !.gitkeep
+
+# Examples
+/examples/*
+!/examples/*.ml
+!/examples/*.wat
+!/examples/*.wasm
