@@ -297,10 +297,10 @@ end;;
 
 module Externkind : sig
   type ocaml =
-    | ExternKind_Func
-    | ExternKind_Global
-    | ExternKind_Table
-    | ExternKind_Memory
+    | Func
+    | Global
+    | Table
+    | Memory
   
   type t = Unsigned.uint8
   val t: t typ
@@ -482,9 +482,9 @@ module Func : sig
     Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr
   type capi_callback_with_env_t =
     unit ptr -> Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr
-  val callback_t: capi_callback_t typ
-  val callback_with_env_t: capi_callback_with_env_t typ
-  type callback_t = Val.Vec.s -> Val.Vec.s -> Trap.s option
+  val capi_callback_t: capi_callback_t typ
+  val capi_callback_with_env_t: capi_callback_with_env_t typ
+  type callback_t = Store.s -> Val.Vec.s -> Val.Vec.s -> Trap.s option
   type callback_with_env_t = unit ptr -> Val.Vec.s -> Val.Vec.s -> Trap.s option
   
   (** Callbacks need to be stored somewhere so they do not get GC'd *)
@@ -552,6 +552,8 @@ module Memory : sig
   
   val data: s -> Byte.byte ptr
   val data_size: s -> int
+  val get_data: s -> int -> int -> bytes
+  val set_data: s -> int -> int -> bytes -> unit
   
   val size: s -> int
   val grow: s -> int -> bool
@@ -561,7 +563,12 @@ module Extern_T: StructType;;
 module Extern : sig
   include module type of struct include DeclareType(Extern_T) end
   module V: VectorType with type data_type = t structure ptr with type owning_struct = s
-  module Vec: module type of struct include DeclareVec(V) end
+  module Vec : sig
+    include module type of struct include DeclareVec(V) end
+    
+    val split_kind: s -> Func.s list * Global.s list * Table.s list * Memory.s list
+    val split_kind_const: s -> Func.s list * Global.s list * Table.s list * Memory.s list
+  end
   
   val kind: s -> Externkind.ocaml
   val type_: s -> Externtype.s

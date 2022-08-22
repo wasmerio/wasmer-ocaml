@@ -13,19 +13,17 @@ The second function (one_lsl_f) gives 2 to the power of its input,
 given its input is between 0 and 63 (otherwise, it will return 0).
 *)
 
-let generate_convert store =
-  let convert_i32_i64 args rets =
-    try
-      let arg = Val.Vec.get_element_const args 0 in
-      let ret = Val.of_i64 (Int64.of_int32 (Val.get_i32 arg)) in
-      Val.Vec.set_element rets 0 ret;
-      None
-    with e ->
-      Some
-        (Trap.new_
-          store
-          (Message.of_string ("Failed with exception: " ^ (Printexc.to_string e)))) in
-  convert_i32_i64;;
+let convert_i32_i64 store args rets =
+  try
+    let arg = Val.Vec.get_element_const args 0 in
+    let ret = Val.of_i64 (Int64.of_int32 (Val.get_i32 arg)) in
+    Val.Vec.set_element rets 0 ret;
+    None
+  with e ->
+    Some
+      (Trap.new_
+        store
+        (Message.of_string ("Failed with exception: " ^ (Printexc.to_string e))));;
 
 let () =
   let wasm = wasm_of_wat
@@ -76,7 +74,7 @@ let () =
   let module_ = Module.new_ store wasm in
   
   let functype = Valkind.[I32] %-> Valkind.[I64] in
-  let func = Func.new_ store functype (generate_convert store) in
+  let func = Func.new_ store functype convert_i32_i64 in
   
   let imports = Extern.Vec.of_list [Extern.of_func func] in
   

@@ -17,3 +17,14 @@ let (%->) args res =
   Functype.new_
     (Valtype.Vec.of_list (List.map Valtype.new_ args))
     (Valtype.Vec.of_list (List.map Valtype.new_ res));;
+
+let load_wasm_file filename =
+  let f = open_in_bin filename in try
+    let flen = in_channel_length f in
+    let b = Bytes.create flen in
+    really_input f b 0 flen;
+    let ret = Byte.Vec.of_bytes b in
+    close_in f; ret
+  with e ->
+    close_in_noerr f;
+    raise e;;

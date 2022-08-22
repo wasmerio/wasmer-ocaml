@@ -184,7 +184,7 @@ module OWNABLE_OBJECT(O: ObjectType) = struct
   end
 end;;
 
-(** The implementation for ownable objects *)
+(** The implementation for ownable objects. *)
 module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
   type s = { p: O.t ptr; mutable state: object_state; d: O.d option };;
   
@@ -264,7 +264,7 @@ module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
     | State_Dependent _ -> failwith "unreachable (real_state = Dependent)"
 end;;
 
-(** The API for DeclareOwn
+(** The API for DeclareOwn.
     @see 'wasm.h' The OCaml implementation for the [WASM_DECLARE_OWN] macro *)
 module DECLARE_OWN(S: StructType) = struct
   module type T = sig
@@ -280,7 +280,7 @@ module DECLARE_OWN(S: StructType) = struct
   end
 end;;
 
-(** The implementation for DeclareOwn structures *)
+(** The implementation for DeclareOwn structures. *)
 module DeclareOwn(T: StructType) : DECLARE_OWN(T).T = struct
   let name = "wasm_" ^ T.name
   
@@ -497,7 +497,7 @@ module DeclareRefBase(T: StructType) : DECLARE_REF_BASE(T).T = struct
     let idx = ref 0 in
     let f = foreign ~stub:true
       (name ^ "_set_host_info_with_finalizer")
-      (ptr t @-> ptr void @-> (funptr ~thread_registration:true (ptr void @-> returning void)) @-> returning void) in
+      (ptr t @-> ptr void @-> (funptr (ptr void @-> returning void)) @-> returning void) in
     fun r hinfo cb -> (* Make sure the callback gets GC'd *)
       let i = !idx in
       let real_callback data =
@@ -849,25 +849,25 @@ end;;
 
 module Externkind = struct
   type ocaml =
-    | ExternKind_Func
-    | ExternKind_Global
-    | ExternKind_Table
-    | ExternKind_Memory
+    | Func
+    | Global
+    | Table
+    | Memory
   
   type t = Unsigned.uint8
   let t: t typ = typedef uint8_t "wasm_externkind_t"
   
   let of_c (vk: t) = match Unsigned.UInt8.to_int vk with
-    | 0 -> ExternKind_Func
-    | 1 -> ExternKind_Global
-    | 2 -> ExternKind_Table
-    | 3 -> ExternKind_Memory
+    | 0 -> Func
+    | 1 -> Global
+    | 2 -> Table
+    | 3 -> Memory
     | i -> invalid_arg ("Invalid C externkind " ^ (string_of_int i))
   let to_c vk: t = Unsigned.UInt8.of_int (match vk with
-    | ExternKind_Func -> 0
-    | ExternKind_Global -> 1
-    | ExternKind_Table -> 2
-    | ExternKind_Memory -> 3)
+    | Func -> 0
+    | Global -> 1
+    | Table -> 2
+    | Memory -> 3)
 end;;
 
 module Externtype_T = struct
@@ -1427,8 +1427,12 @@ end;;
 module Func_T = struct
   let name = "func"
   type d =
-    | CallbackFunc of (Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr)
-    | CallbackEnvFunc of (unit ptr -> Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr)
+    | CallbackFunc of
+      (Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr)
+    | CallbackEnvFunc of
+      ((unit ptr ->
+        Val.Vec.t structure ptr -> Val.Vec.t structure ptr -> Trap.t structure ptr) *
+      (unit ptr -> unit) option)
 end;;
 module Func = struct
   include DeclareType(Func_T)
@@ -1438,29 +1442,26 @@ module Func = struct
   type capi_callback_with_env_t =
     unit ptr -> Val.Vec.t structure ptr
      -> Val.Vec.t structure ptr -> Trap.t structure ptr
-  let callback_t =
+  let capi_callback_t =
     typedef
-      (funptr ~thread_registration:true
-       (ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t)))
+      (funptr (ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t)))
       "wasm_func_callback_t"
-  let callback_with_env_t =
+  let capi_callback_with_env_t =
     typedef
-      (funptr ~thread_registration:true
-       (ptr void @-> ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t)))
+      (funptr (ptr void @-> ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t)))
       "wasm_func_callback_with_env_t"
-  type callback_t = Val.Vec.s -> Val.Vec.s -> Trap.s option
-  type callback_with_env_t = unit ptr -> Val.Vec.s -> Val.Vec.s -> Trap.s option
+  type callback_t = Store.s -> Val.Vec.s -> Val.Vec.s -> Trap.s option
+  type callback_with_env_t = Wasi_.Env_.s -> Val.Vec.s -> Val.Vec.s -> Trap.s option
   
   let capi_new =
     foreign ~stub:true
       "wasm_func_new"
-      (ptr Store.t @-> ptr Functype.t @-> callback_t @-> returning (ptr t))
+      (ptr Store.t @-> ptr Functype.t @-> capi_callback_t @-> returning (ptr t))
   let capi_new_with_env =
     foreign ~stub:true
       "wasm_func_new_with_env"
-      (ptr Store.t @-> ptr Functype.t @-> callback_with_env_t @-> ptr void @->
-        (funptr ~thread_registration:true (ptr void @-> returning void)) @->
-        returning (ptr t))
+      (ptr Store.t @-> ptr Functype.t @-> capi_callback_with_env_t @-> ptr void @->
+        (funptr_opt (ptr void @-> returning void)) @-> returning (ptr t))
   
   let capi_type =
     foreign ~stub:true "wasm_func_type" (ptr t @-> returning (ptr Functype.t))
@@ -1474,8 +1475,8 @@ module Func = struct
       "wasm_func_call"
       (ptr t @-> ptr Val.Vec.t @-> ptr Val.Vec.t @-> returning (ptr Trap.t))
   
-  let generate_callback cb = fun args rets ->
-    match cb (Val.Vec.make_from_unsafe args State_Const)
+  let generate_callback store cb = fun args rets ->
+    match cb store (Val.Vec.make_from_unsafe args State_Const)
       (Val.Vec.make_from_unsafe rets State_RW) with
     | None -> from_voidp Trap.t null
     | Some trap -> Trap.grab_ownership trap
@@ -1484,27 +1485,33 @@ module Func = struct
       (Val.Vec.make_from_unsafe rets State_RW) with
     | None -> from_voidp Trap.t null
     | Some trap -> Trap.grab_ownership trap
+  let generate_finalizer_env optfin = Option.map (fun fin -> fun env ->
+    fin env) optfin
   
   let new_ store typ cb =
-    let newcb = generate_callback cb in
+    let newcb = generate_callback store cb in
     make_from_raise_data
       (capi_new (Store.get_ptr store) (Functype.get_ptr typ) newcb) State_Owned
       (Func_T.CallbackFunc newcb)
   let new_unsafe store typ cb =
-    let newcb = generate_callback cb in
+    let newcb = generate_callback store cb in
     make_from_unsafe_data
       (capi_new (Store.get_ptr store) (Functype.get_ptr typ) newcb) State_Owned
       (Func_T.CallbackFunc newcb)
   let new_with_env store typ cb env finalizer =
     let newcb = generate_callback_env cb in
+    let newfin = generate_finalizer_env finalizer in
     make_from_raise_data (capi_new_with_env
-      (Store.get_ptr store) (Functype.get_ptr typ) newcb env finalizer) State_Owned
-      (Func_T.CallbackEnvFunc newcb)
+        (Store.get_ptr store) (Functype.get_ptr typ) newcb
+        env newfin) State_Owned
+      (Func_T.CallbackEnvFunc (newcb, newfin))
   let new_with_env_unsafe store typ cb env finalizer =
     let newcb = generate_callback_env cb in
+    let newfin = generate_finalizer_env finalizer in
     make_from_unsafe_data (capi_new_with_env
-      (Store.get_ptr store) (Functype.get_ptr typ) newcb env finalizer) State_Owned
-      (Func_T.CallbackEnvFunc newcb)
+        (Store.get_ptr store) (Functype.get_ptr typ) newcb
+        env newfin) State_Owned
+      (Func_T.CallbackEnvFunc (newcb, newfin))
   
   let type_ self =
     Functype.make_from_raise (capi_type (get_ptr_const self)) State_Owned
@@ -1640,22 +1647,22 @@ module Memory = struct
   
   let capi_new =
     foreign ~stub:true
-      "wasm_memoy_new"
+      "wasm_memory_new"
       (ptr Store.t @-> ptr Memorytype.t @-> returning (ptr t))
   
   let capi_type =
-    foreign ~stub:true "wasm_memoy_type" (ptr t @-> returning (ptr Memorytype.t))
+    foreign ~stub:true "wasm_memory_type" (ptr t @-> returning (ptr Memorytype.t))
   
   let capi_data =
-    foreign ~stub:true "wasm_memoy_data" (ptr t @-> returning (ptr Byte.byte))
+    foreign ~stub:true "wasm_memory_data" (ptr t @-> returning (ptr Byte.byte))
   let capi_data_size =
-    foreign ~stub:true "wasm_memoy_data_size" (ptr t @-> returning size_t)
+    foreign ~stub:true "wasm_memory_data_size" (ptr t @-> returning size_t)
   
   let capi_size =
-    foreign ~stub:true "wasm_memoy_size" (ptr t @-> returning pages_t)
+    foreign ~stub:true "wasm_memory_size" (ptr t @-> returning pages_t)
   let capi_grow =
     foreign ~stub:true
-      "wasm_memoy_grow"
+      "wasm_memory_grow"
       (ptr t @-> pages_t @-> returning bool)
   
   let new_ store typ =
@@ -1670,6 +1677,20 @@ module Memory = struct
   
   let data self = capi_data (get_ptr self)
   let data_size self = Unsigned.Size_t.to_int (capi_data_size (get_ptr_const self))
+  let get_data self offset size =
+    if offset < 0 then invalid_arg "Offset is negative"
+    else if offset + size > page_size * (data_size self) then
+      invalid_arg "Offset + size is too big"
+    else
+      let dat = (data self) +@ offset in
+      Bytes.init size (fun i -> Char.chr (Unsigned.UInt8.to_int (!@ (dat +@ i))))
+  let set_data self offset size newdata =
+    if offset < 0 then invalid_arg "Offset is negative"
+    else if offset + size > page_size * (data_size self) then
+      invalid_arg "Offset + size is too big"
+    else
+      let dat = (data self) +@ offset in
+      Bytes.iteri (fun i c -> (dat +@ i) <-@ Unsigned.UInt8.of_int (Char.code c)) newdata
   
   let size self = Unsigned.UInt32.to_int (capi_size (get_ptr_const self))
   let grow self delta = capi_grow (get_ptr self) (Unsigned.UInt32.of_int delta)
@@ -1681,16 +1702,6 @@ module Extern_T = struct
 end;;
 module Extern = struct
   include DeclareType(Extern_T)
-  module V = struct
-    type data_type = t structure ptr
-    let data_type = ptr t
-    let name = Extern_T.name
-    
-    type owning_struct = s
-    let grab_ownership s = grab_ownership s
-    let to_dependent p f = make_from_unsafe p (State_Dependent f)
-  end
-  module Vec = DeclareVec(V)
   
   let capi_kind =
     let f =
@@ -1822,6 +1833,44 @@ module Extern = struct
       (State_Dependent
         ((fun () -> max_state_const (get_state self)),
          (fun st -> update_state self st)))
+  
+  module V = struct
+    type data_type = t structure ptr
+    let data_type = ptr t
+    let name = Extern_T.name
+    
+    type owning_struct = s
+    let grab_ownership s = grab_ownership s
+    let to_dependent p f = make_from_unsafe p (State_Dependent f)
+  end
+  module Vec = struct
+    include DeclareVec(V)
+    
+    let split_kind self =
+      let sz = get_size self in
+      let rec inner funcs gbls tbls mems i =
+        if i = sz then List.rev funcs, List.rev gbls, List.rev tbls, List.rev mems
+        else begin let elt = get_element self i in
+          match kind elt with
+          | Externkind.Func -> inner ((to_func elt) :: funcs) gbls tbls mems (i + 1)
+          | Externkind.Global -> inner funcs ((to_global elt) :: gbls) tbls mems (i + 1)
+          | Externkind.Table -> inner funcs gbls ((to_table elt) :: tbls) mems (i + 1)
+          | Externkind.Memory -> inner funcs gbls tbls ((to_memory elt) :: mems) (i + 1)
+        end
+      in inner [] [] [] [] 0
+    let split_kind_const self =
+      let sz = get_size self in
+      let rec inner funcs gbls tbls mems i =
+        if i = sz then List.rev funcs, List.rev gbls, List.rev tbls, List.rev mems
+        else begin let elt = get_element_const self i in
+          match kind elt with
+          | Externkind.Func -> inner ((to_func elt) :: funcs) gbls tbls mems (i + 1)
+          | Externkind.Global -> inner funcs ((to_global elt) :: gbls) tbls mems (i + 1)
+          | Externkind.Table -> inner funcs gbls ((to_table elt) :: tbls) mems (i + 1)
+          | Externkind.Memory -> inner funcs gbls tbls ((to_memory elt) :: mems) (i + 1)
+        end
+      in inner [] [] [] [] 0
+  end
 end;;
 
 module Instance_T = struct
