@@ -26,7 +26,7 @@ all:
 
 LIB_INTERFACE:=lib/Wasmer_ocaml.cmi lib/Wasmer_ocaml__WasmerBindings.cmi lib/Wasmer_ocaml__Util.cmi
 TESTS:=test/instance/instance test/hello/hello
-EXAMPLES:=examples/hello examples/instance
+EXAMPLES:=examples/hello examples/instance examples/rust
 
 all: wasmer_ocaml $(TESTS)
 
@@ -327,6 +327,44 @@ examples/instance: lib/Wasmer_ocaml.cmxa obj/examples/instance.cmx
 		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes-foreign.cmxa \
 		lib/Wasmer_ocaml.cmxa \
 		obj/examples/instance.cmx
+obj/examples/rust.cmo: $(LIB_INTERFACE) examples/rust.ml
+	@echo "Compiling example 'rust' cmo"
+	$(SILENCER)$(OCAMLC) \
+		$(OCAMLFLAGS) \
+		$(INCLUDES) \
+		-I lib \
+		-no-alias-deps \
+		-o obj/examples/rust.cmo \
+		-c examples/rust.ml
+obj/examples/rust.cmx: $(LIB_INTERFACE) examples/rust.ml
+	@echo "Compiling example 'rust' cmx"
+	$(SILENCER)$(OCAMLOPT) \
+		$(OCAMLFLAGS) \
+		$(INCLUDES) \
+		-I lib \
+		-no-alias-deps \
+		-o obj/examples/rust.cmx \
+		-c examples/rust.ml
+
+examples/rust-wasm/target/wasm32-unknown-unknown/release/rust_integration.wasm:
+	@echo "Compiling the rust_integration.wasm for example 'rust'"
+	$(SILENCER)cd examples; cd rust-wasm; cargo build --target=wasmtime-unknown-unknown --release
+
+examples/rust: lib/Wasmer_ocaml.cmxa obj/examples/rust.cmx examples/rust-wasm/target/wasm32-unknown-unknown/release/rust_integration.wasm
+	@echo "Compiling example 'rust'"
+	$(SILENCER)$(OCAMLOPT) \
+		$(OCAMLFLAGS) \
+		$(INCLUDES) \
+		-I lib \
+		-o examples/rust \
+		$(OPAM_SWITCH_PREFIX)/lib/bigarray-compat/bigarray_compat.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/integers/integers.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ocaml/unix.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ocaml/threads/threads.cmxa \
+		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes-foreign.cmxa \
+		lib/Wasmer_ocaml.cmxa \
+		obj/examples/rust.cmx
 
 # OCaml bug: the sigaltstack can't be changed by an external library
 # or the program will crash on exit
@@ -341,6 +379,7 @@ examples: $(EXAMPLES)
 	@echo "Reminder: segmentation fault errors when exiting are known and an OCaml bug."
 	-echo; echo Example: hello; cd examples; ./hello
 	-echo; echo Example: instance; cd examples; ./instance
+	-echo; echo Example: rust; cd examples; ./rust
 .PHONY: examples
 
 clean:

@@ -150,6 +150,20 @@ module DeclareRef(T: StructType) : sig
 end;;
 
 
+(* Forward declaration *)
+module Wasi_ : sig
+  module Env_O_ : sig
+    type _t
+    type t = _t structure
+    type d = unit
+    val make: unit -> t ptr
+    val delete: t ptr -> unit
+  end
+  module Env_ : sig
+    include module type of struct include OwnableObject(Env_O_) end
+  end
+end;;
+
 module Byte : sig
   type byte = Unsigned.uint8
   val byte: byte typ
@@ -485,15 +499,15 @@ module Func : sig
   val capi_callback_t: capi_callback_t typ
   val capi_callback_with_env_t: capi_callback_with_env_t typ
   type callback_t = Store.s -> Val.Vec.s -> Val.Vec.s -> Trap.s option
-  type callback_with_env_t = unit ptr -> Val.Vec.s -> Val.Vec.s -> Trap.s option
+  type callback_with_env_t = Wasi_.Env_.s -> Val.Vec.s -> Val.Vec.s -> Trap.s option
   
   (** Callbacks need to be stored somewhere so they do not get GC'd *)
   val new_: Store.s -> Functype.s -> callback_t -> s
   val new_unsafe: Store.s -> Functype.s -> callback_t -> s
   val new_with_env:
-    Store.s -> Functype.s -> callback_with_env_t -> unit ptr -> (unit ptr -> unit) -> s
+    Store.s -> Functype.s -> callback_with_env_t -> Wasi_.Env_.s -> (Wasi_.Env_.s -> unit) option -> s
   val new_with_env_unsafe:
-    Store.s -> Functype.s -> callback_with_env_t -> unit ptr -> (unit ptr -> unit) -> s
+    Store.s -> Functype.s -> callback_with_env_t -> Wasi_.Env_.s -> (Wasi_.Env_.s -> unit) option -> s
   
   val type_: s -> Functype.s
   val param_arity: s -> int
@@ -604,3 +618,45 @@ module Instance : sig
   val exports: s -> Extern.Vec.s -> unit
 end;;
 val frame_instance: Frame.s -> Instance.s;;
+
+module Wasi : sig
+  (* Enabled only if WASMER_WASI_ENABLED was defined at the C API library compile time *)
+  module Config_T : sig
+    val name: string
+  end
+  module Config : sig
+    val name: string
+    
+    type t
+    val t: t structure typ
+    
+    type t_bis = t
+    module O : sig
+      type t = t_bis structure
+      type d = unit
+      
+      val make: unit -> t ptr
+      val delete: t ptr -> unit
+    end
+    include module type of struct include OwnableObject(O) end
+    
+    val new_: string -> s
+    val new_unsafe: string -> s
+    (* TODO: all other wasi_config_* functions *)
+  end
+  
+  include module type of struct include Wasi_ end
+  module Env_T : sig
+    type t = Env_O_._t
+    val name: string
+  end
+  module Env : sig
+    type t = Env_T.t
+    val t: t structure typ
+    include module type of struct include Env_ end
+    
+    val new_: Store.s -> Config.s -> s
+    val new_unsafe: Store.s -> Config.s -> s
+    val get_imports: Store.s -> s -> Module.s -> Extern.Vec.s option
+  end
+end;;

@@ -20,3 +20,14 @@
 !/examples/*.ml
 !/examples/*.wat
 !/examples/*.wasm
+!/examples/rust-wasm/
+/examples/rust-wasm/*
+!/examples/rust-wasm/Cargo.toml
+!/examples/rust-wasm/src/
+!/examples/rust-wasm/target/
+/examples/rust-wasm/target/*
+!/examples/rust-wasm/target/wasm32-unknown-unknown/
+/examples/rust-wasm/target/wasm32-unknown-unknown/*
+!/examples/rust-wasm/target/wasm32-unknown-unknown/release/
+/examples/rust-wasm/target/wasm32-unknown-unknown/release/*
+!/examples/rust-wasm/target/wasm32-unknown-unknown/release/rust_integration.wasm

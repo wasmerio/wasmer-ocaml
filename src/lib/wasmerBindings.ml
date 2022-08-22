@@ -561,6 +561,21 @@ module DeclareRef(T: StructType) : DECLARE_REF(T).T = struct
 end;;
 
 
+(* Forward declaration *)
+module Wasi_ = struct
+  module Env_O_ = struct
+    type _t
+    type t = _t structure
+    type d = unit
+    let t: t typ = structure "wasi_env"
+    let make () = addr (make t)
+    let delete = foreign ~stub:true "wasi_env_delete" (ptr t @-> returning void)
+  end
+  module Env_ = struct
+    include OwnableObject(Env_O_)
+  end
+end;;
+
 module Byte = struct
   type byte = Unsigned.uint8
   let byte = uint8_t
@@ -1481,12 +1496,14 @@ module Func = struct
     | None -> from_voidp Trap.t null
     | Some trap -> Trap.grab_ownership trap
   let generate_callback_env cb = fun env args rets ->
-    match cb env (Val.Vec.make_from_unsafe args State_Const)
+    match cb
+      (Wasi_.Env_.make_from_unsafe (from_voidp Wasi_.Env_O_.t env) State_RW)
+      (Val.Vec.make_from_unsafe args State_Const)
       (Val.Vec.make_from_unsafe rets State_RW) with
     | None -> from_voidp Trap.t null
     | Some trap -> Trap.grab_ownership trap
   let generate_finalizer_env optfin = Option.map (fun fin -> fun env ->
-    fin env) optfin
+    fin (Wasi_.Env_.make_from_unsafe (from_voidp Wasi_.Env_O_.t env) State_RW)) optfin
   
   let new_ store typ cb =
     let newcb = generate_callback store cb in
@@ -1503,14 +1520,14 @@ module Func = struct
     let newfin = generate_finalizer_env finalizer in
     make_from_raise_data (capi_new_with_env
         (Store.get_ptr store) (Functype.get_ptr typ) newcb
-        env newfin) State_Owned
+        (to_voidp (Wasi_.Env_.get_ptr env)) newfin) State_Owned
       (Func_T.CallbackEnvFunc (newcb, newfin))
   let new_with_env_unsafe store typ cb env finalizer =
     let newcb = generate_callback_env cb in
     let newfin = generate_finalizer_env finalizer in
     make_from_unsafe_data (capi_new_with_env
         (Store.get_ptr store) (Functype.get_ptr typ) newcb
-        env newfin) State_Owned
+        (to_voidp (Wasi_.Env_.get_ptr env)) newfin) State_Owned
       (Func_T.CallbackEnvFunc (newcb, newfin))
   
   let type_ self =
@@ -1912,3 +1929,64 @@ let frame_instance f =
   Instance.make_from_raise
     (from_voidp Instance.t (to_voidp
      (Frame.capi_instance (Frame.get_ptr_const f)))) State_Owned;;
+
+module Wasi = struct
+  (* Enabled only if WASMER_WASI_ENABLED was defined at the C API library compile time *)
+  module Config_T = struct
+    let name = "config"
+  end
+  module Config = struct
+    let name = "wasi_config"
+    
+    type t
+    let t: t structure typ = structure name
+    
+    type t_bis = t
+    module O = struct
+      type t = t_bis structure
+      type d = unit
+      
+      let make () = addr (make t)
+      let delete ptr =
+        (* TODO: panic? (There is no wasi_config_new) *) ()
+    end
+    include OwnableObject(O)
+    
+    let capi_new = foreign ~stub:true "wasi_config_new" (string @-> returning (ptr t))
+    let new_ name = make_from_raise (capi_new name) State_Owned
+    let new_unsafe name = make_from_unsafe (capi_new name) State_Owned
+    (* TODO: all other wasi_config_* functions *)
+  end
+  
+  include Wasi_
+  module Env_T = struct
+    type t = Env_O_._t
+    let name = "env"
+  end
+  module Env = struct
+    type t = Env_T.t
+    let t = Env_O_.t
+    include Env_
+    
+    let capi_new =
+      foreign ~stub:true "wasi_env_new"
+        (ptr Store.t @-> ptr Config.t @-> returning (ptr t))
+    let capi_get_imports =
+      foreign ~stub:true "wasi_get_imports"
+        (ptr Store.t @-> ptr t @-> ptr Module.t @-> ptr Extern.Vec.t @-> returning bool)
+    
+    (* Ownership status is assumed, as there are no wasi_config_delete *)
+    let new_ store config = make_from_raise
+      (capi_new (Store.get_ptr store) (Config.grab_ownership config)) State_Owned
+    let new_unsafe store config = make_from_unsafe
+      (capi_new (Store.get_ptr store) (Config.grab_ownership config)) State_Owned
+    let get_imports store env module_ =
+      let ret = Extern.Vec.make_new () in
+      if capi_get_imports
+        (Store.get_ptr_const store)
+        (get_ptr env)
+        (Module.get_ptr_const module_)
+        (Extern.Vec.get_ptr ret) then Some ret
+      else None
+  end
+end;;
