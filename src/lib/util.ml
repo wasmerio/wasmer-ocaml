@@ -1,6 +1,6 @@
 open Ctypes;;
 open Foreign;;
-open Wasmer_ocaml__WasmerBindings;;
+open Wasmer__WasmerBindings;;
 
 let wat2wasm =
   let f = foreign "wat2wasm" (ptr Byte.Vec.t @-> ptr Byte.Vec.t @-> returning void) in

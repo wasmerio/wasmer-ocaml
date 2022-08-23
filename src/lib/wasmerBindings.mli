@@ -1,110 +1,226 @@
+(** This module contains all bindings.
+    Currently, only bindings to functions in wasm.h have been implemented. *)
+
 open Ctypes;;
 
 exception Returned_null of string;;
+(** A C function returned NULL where a non-null value was required *)
 exception Invalid_access of string;;
+(** A pointer was accessed but its ownership realtive to the caller was not
+    high enough.
+    For example, trying to get a pointer using get_ptr while the pointer was
+    given away will raise this exception. *)
 
+(**/**)
 type 'a dependent_update_func
+(**/**)
 
 type object_state =
-  | State_Owned
-  | State_RW
-  | State_Const
+  | State_Owned (** The object is owned by the caller. *)
+  | State_RW (** The object is accessible by the caller. *)
+  | State_Const (** The object is accessible by the caller in read-only. *)
   | State_Dependent of ((unit -> object_state) * object_state dependent_update_func)
-  | State_PassedAway;;
+    (** The object's state depends on another.
+        The first function is to get the current state, the second function
+        updates it. *)
+  | State_PassedAway;; (** The current pointer has been given away. *);;
+(** The state of the ownership of the pointed-to object. *)
 val get_real_state: object_state -> object_state;;
+(** Gets the real state of the object_state.
+    Never returns {!const:WasmerBindings.object_state.State_Dependent}. *)
 val max_state_const: object_state -> object_state;;
+(** Gets the real state of the object_state, and reduces the ownership to
+    read-only if required. This is the same as [get_real_state st] if the
+    result is not {!const:WasmerBindings.object_state.State_Owned} or
+    {!const:WasmerBindings.object_state.State_RW}, and is
+    {!const:WasmerBindings.object_state.State_Const} otherwise. *)
 
 module type ObjectType = sig
   type t
+  (** The owned type *)
   type d
+  (** Additional data that need to hold for the same length as the object *)
   
+  (**/**)
   val make: unit -> t ptr (** Not part of the public API: DO NOT USE *)
   val delete: t ptr -> unit (** Not part of the public API: DO NOT USE *)
+  (**/**)
 end;;
+(** The metadata type for ownable objects *)
 module type StructType = sig
   val name: string
+  (** The structure base name (without the [wasm_] prefix and [_t] suffix) *)
   type d
+  (** Additional data that need to hold for the same length as the structure *)
 end;;
+(** The metadata type for structure-declaring objects *)
 module type VectorType = sig
   type data_type
   val data_type: data_type typ
   
   val name: string
+  (** The structure base name (without the [wasm_] prefix and [_vec_t] suffix) *)
   
   type owning_struct
+  (** Vectors always take ownership of their elements. *)
   val grab_ownership: owning_struct -> data_type
+  (** Take away the ownership. *)
   val to_dependent:
-    data_type -> (unit -> object_state) * object_state dependent_update_func -> owning_struct
+    data_type -> (unit -> object_state) * object_state dependent_update_func ->
+    owning_struct
+  (** Transform an element of the vector back to a pointer,
+      which ownership is dependent on this vector.
+      @param obj The element
+      @param arg The ownership callbacks
+      @return The new owning structure *)
 end;;
+(** The metadata type for vector structures *)
 
 module OwnableObject(O: ObjectType) : sig
   type s
+  (** The owning structure type. *)
   
   val make_new: unit -> s
+  (** Make a new owning structure from a new pointer. *)
   val make_from_raise: O.t ptr -> object_state -> s
+  (** Make a new owning structure from a pointer.
+      See also {!val:WasmerBindings.OwnableObject.make_from_unsafe}.
+      @raise Returned_null If the pointer is NULL *)
   val make_from_unsafe: O.t ptr -> object_state -> s
+  (** Make a new owning structure from a pointer.
+      Does not raise an exception if NULL is given.
+      See also {!val:WasmerBindings.OwnableObject.make_from_raise}. *)
+  val make_from_raise_data: O.t ptr -> object_state -> O.d -> s
+  (** Make a new owning structure from a pointer, with an additional data.
+      See also {!val:WasmerBindings.OwnableObject.make_from_unsafe_data}.
+      @raise Returned_null If the pointer is NULL *)
+  val make_from_unsafe_data: O.t ptr -> object_state -> O.d -> s
+  (** Make a new owning structure from a pointer, with an additional data.
+      Does not raise an exception if NULL is given.
+      See also {!val:WasmerBindings.OwnableObject.make_from_raise_data}. *)
   
   val get_state: s -> object_state
+  (** Returns the current ownership state. *)
   val lose_ownership: s -> unit
-  (** Give the ownership of this to the caller
-      Equivalent to (let p = get_ptr <s> in lose_ownership <s>; p) *)
+  (** Sets the current ownership state to
+      {!const:WasmerBindings.object_state.State_PassedAway}.
+      Ignores the current ownership. *)
   val grab_ownership: s -> O.t ptr
-  (** Delete then give a given-away pointer (own-out parameters in the C API) *)
+  (** [grab_ownership self] gives the ownership of the pointed object to the
+      caller code.
+      It is equivalent to [let p = get_ptr self in lose_ownership self; p],
+      but with additional checks for the current ownership.
+      @return The pointer *)
   val gain_ownership_back: s -> O.t ptr
+  (** Deletes the object if required, then sets the ownership to
+      {!const:WasmerBindings.object_state.State_Owned} and returns the pointer.
+      This is only to be used in own-out function arguments
+      in the C API or equivalent.
+      
+      @return A deleted or given-away pointer.
+      @raise Invalid_access If the current state is
+      {!const:WasmerBindings.object_state.State_Dependent} *)
   
   val is_null: s -> bool
+  (** Returns [Ctypes.is_null] on the underlying pointer, ignoring the current
+      ownership state. *)
   val get_ptr: s -> O.t ptr
+  (** Returns the underlying pointer, requiring a sufficient
+      ownership state.
+      @raise Invalid_access If the current state is lower than
+      {!const:WasmerBindings.object_state.State_RW}  *)
   val get_ptr_const: s -> O.t ptr
-  (** Inherently unsafe (fails if the pointer is not given away) *)
+  (** Returns the underlying pointer, requiring a sufficient
+      ownership state.
+      @raise Invalid_access If the current state is lower than
+      {!const:WasmerBindings.object_state.State_Const}  *)
   val get_ptr_givenaway: s -> O.t ptr
+  (** Inherently unsafe function that returns a given-away pointer.
+      @raise Invalid_access If the current state is not
+      {!const:WasmerBindings.object_state.State_PassedAway} *)
   
   val delete: s -> unit
+  (** Frees the underlying pointer.
+      A side effect is to mark the object as given away. *)
 end;;
+(** Ownable objects are the basic structure that maintains an ownership state
+    on C objects. *)
 
 module DeclareOwn(T: StructType) : sig
   val name: string
+  (** The C name of the structure without the [_t] suffix. *)
   type t
+  (** The C unique (abstract) base type for the structure.
+      the structure type is therefore [t structure]. *)
   val t: t structure typ
+  (** The Ctypes definition of the C structure. *)
   
+  (**/**)
   module O: ObjectType with type t = t structure
+  (**/**)
   include module type of struct include OwnableObject(O) end
+  (** This structure maintains an ownership status.
+      See also {!module:WasmerBindings.OwnableObject}. *)
 end;;
+(** The base WASM objects, declared in [wasm.h] as [WASM_DECLARE_OWN]. *)
 
 module DeclareVec(U: VectorType) : sig
   type data_type = U.data_type
+  (** The vector's data type *)
   val data_type: data_type typ
+  (** The vector's Ctypes data type declaration *)
   
   val name: string
+  (** The vector name (without the [_t]) *)
   
   type t
+  (** The C unique (abstract) base type for the structure.
+      the structure type is therefore [t structure]. *)
   val t: t structure typ
+  (** The Ctypes definition of the C structure. *)
   val fsize: (Unsigned.size_t, t structure) field
+  (** The raw [size] field of the structure *)
   val fdata: (data_type ptr, t structure) field
+  (** The raw [data] field of the structure *)
   
-  module O : ObjectType with type t = t structure
+  (**/**)
+  module O: ObjectType with type t = t structure
+  (**/**)
   include module type of struct include OwnableObject(O) end
+  (** This structure maintains an ownership status.
+      See also {!module:WasmerBindings.OwnableObject}. *)
   
   val make_empty: unit -> s
-  val make_empty_null: unit -> s (** Initializes the data field to NULL *)
+  (** Makes a new vector, calling the [wasm_*vec*_new] C API function. *)
+  val make_empty_null: unit -> s
+  (** Makes a new vector, initializing the data field to NULL. *)
   val make_uninit: int -> s
-  (*val new_empty: s -> unit
-  val new_empty_null: s -> unit (** Initializes the data field to NULL *)
-  val new_uninit: s -> int -> unit*)
+  (** Makes a new uninitialized vector. *)
   
   val duplicate: s -> s
+  (** Duplicates the current vector. No guarantee is made on the deep-ness of
+      the copy. *)
   
-  (** The vector always get ownership of the data *)
   val of_array: U.owning_struct array -> s
+  (** Makes a vector from an array, taking ownership of the elements. *)
   val of_list: U.owning_struct list -> s
+  (** Makes a vector from a list, taking ownership of the elements. *)
   
   val get_size: s -> int
+  (** Gets the [size] field of the vector. *)
   val get_element: s -> int -> U.owning_struct
+  (** [get_element vec i] gets the [i]th element of [vec] with the correct
+      {!const:WasmerBindings.object_state.Dependent} ownership state. *)
   val get_element_unsafe: s -> int -> U.owning_struct
   val get_element_const: s -> int -> U.owning_struct
+  (** [get_element vec i] gets the [i]th element of [vec] with the correct
+      {!const:WasmerBindings.object_state.Dependent} ownership state. *)
   val get_element_const_unsafe: s -> int -> U.owning_struct
   val set_element: s -> int -> U.owning_struct -> unit
   val set_element_unsafe: s -> int -> U.owning_struct -> unit
 end;;
+(** The vector type, declared in the C API with the [WASM_DECLARE_VEC] macro.
+    Vectors always get ownership of their data. *)
 
 module DeclareType(T: StructType) : sig
   include module type of struct include DeclareOwn(T) end

@@ -1,46 +1,27 @@
-(** This module contains all bindings.
-    Currently, only bindings to functions in wasm.h have been implemented. *)
-
 open Ctypes;;
 open Foreign;;
 
 let () =
   foreign "assertions" (void @-> returning void) ();;
 
-(** A C function returned NULL where a non-null value was required *)
 exception Returned_null of string;;
-(** A pointer was accessed but its ownership realtive to the caller was not
-    high enough.
-    For example, trying to get a pointer using get_ptr while the pointer was
-    given away will raise this exception. *)
 exception Invalid_access of string;;
 
-(** This is the update function.
-    @see {!const:object_state.State_Dependent} *)
 type 'a dependent_update_func = 'a -> unit;; (* Not part of the public API *)
 
-(** The state of the ownership of the pointed-to object *)
 type object_state =
-  | State_Owned (** The object is owned by the caller *)
-  | State_RW (** The object is accessible by the caller *)
-  | State_Const (** The object is accessible by the caller in read-only *)
+  | State_Owned
+  | State_RW
+  | State_Const
   | State_Dependent of ((unit -> object_state) * object_state dependent_update_func)
-    (** The object's state depends on another.
-        The first function is to get the current state, the second function
-        updates it. *)
-  | State_PassedAway;; (** The current pointer has been given away. *)
+  | State_PassedAway;;
 
-(** Gets the real state of the object_state. This is the same as [st] if [st]
-    is not [State_Dependent _], but also follows the function. *)
 let rec get_real_state st = match st with
   | State_Dependent (f, _) -> get_real_state (f ())
   | State_Owned
   | State_RW
   | State_Const
   | State_PassedAway -> st;;
-(** Gets the real state of the object_state, and reduces the ownership to
-    read-only if needed. This is the same as [get_real_state st] if the result
-    is not [State_Owned], and is [State_Const] otherwise. *)
 let rec max_state_const st = match st with
   | State_Dependent (f, _) -> max_state_const (f ())
   | State_Owned
@@ -48,11 +29,8 @@ let rec max_state_const st = match st with
   | State_Const -> State_Const
   | State_PassedAway -> State_PassedAway;;
 
-(** The metadata type for ownable objects *)
 module type ObjectType = sig
-  (** The owned type *)
   type t
-  (** Additional data that need to hold for the same length as the object *)
   type d
   (** Creates a new pointer.
       @see {!val:OwnableObject.make_new} *)
@@ -61,132 +39,58 @@ module type ObjectType = sig
       The ownership is guaranteed to be [State_Owned]. *)
   val delete: t ptr -> unit (* Not part of the public API *)
 end;;
-(** The metadata type for structure-declaring objects *)
 module type StructType = sig
-  (** The structure base name (without the [wasm_] prefix and [_t] suffix) *)
   val name: string
-  (** Additional data that need to hold for the same length as the structure *)
   type d
 end;;
-(** The metadata type for vector structures *)
 module type VectorType = sig
   type data_type
   val data_type: data_type typ
   
-  (** The structure base name (without the [wasm_] prefix and [_vec_t] suffix) *)
   val name: string
   
-  (** Vectors take ownership of their elements if possible. *)
   type owning_struct
-  (** Take away the ownership *)
   val grab_ownership: owning_struct -> data_type
-  (** Transform an element of the vector back to a pointer,
-      which ownership is dependent
-      @param obj The element
-      @param arg The ownership callbacks
-      @return The new owning structure *)
   val to_dependent:
     data_type -> (unit -> object_state) * object_state dependent_update_func -> owning_struct
 end;;
 
-(** The API for ownable objects. This depends on an ObjectType. *)
 module OWNABLE_OBJECT(O: ObjectType) = struct
   module type T = sig
-    (** The owning structure type *)
     type s
     
-    (** Make a new owning structure from a new pointer.
-        @param st The initial pointer state *)
     val make_new_st: object_state -> s (* Not part of the public API *)
-    (** Make a new owning structure from a new pointer.
-        Equivalent to [make_new_st State_Owned] (but available in the public API). *)
     val make_new: unit -> s
-    (** Make a new owning structure from a pointer.
-        @param ptr The raw pointer
-        @param st The current ownership state
-        @return The new ownership structure
-        @raise Returned_null If the pointer is NULL
-        @see {!val:OwnableObject.make_from_unsafe} *)
     val make_from_raise: O.t ptr -> object_state -> s
-    (** Make a new owning structure from a pointer.
-        Does not raise an exception if NULL is given.
-        @param ptr The raw pointer
-        @param st The current ownership state
-        @return The new ownership structure
-        @see {!val:OwnableObject.make_from_unsafe} *)
     val make_from_unsafe: O.t ptr -> object_state -> s
-    (** Make a new owning structure from a pointer, with an additional data.
-        @param ptr The raw pointer
-        @param st The current ownership state
-        @param d The additional data
-        @return The new ownership structure
-        @raise Returned_null If the pointer is NULL
-        @see {!val:OwnableObject.make_from_unsafe} *)
     val make_from_raise_data: O.t ptr -> object_state -> O.d -> s
-    (** Make a new owning structure from a pointer, with an additional data.
-        Does not raise an exception if NULL is given.
-        @param ptr The raw pointer
-        @param st The current ownership state
-        @param d The additional data
-        @return The new ownership structure
-        @see {!val:OwnableObject.make_from_unsafe} *)
     val make_from_unsafe_data: O.t ptr -> object_state -> O.d -> s
     
-    (* Set -- discards Dependent, ignore ownership hierarchy (own > const > passed away)
+    (* Set -- discards Dependent, ignore ownership hierarchy
        Update -- updates Dependent, crash if ownership increases *)
-    (** Override the current state of the pointer.
+    (** Overrides the current state of the pointer.
         Ignores the updator if the current state is [State_Dependent _]. *)
     val set_state: s -> object_state -> unit (* Not part of the public API *)
     (** Updates the current state of the pointer.
         Updates through the updator if the current state is [State_Dependent _]. *)
     val update_state: s -> object_state -> unit (* Not part of the public API *)
     
-    (** Returns the current ownership state. *)
     val get_state: s -> object_state
-    (** Sets the current ownership state to {!const:object_state.State_GivenAway}.
-        Ignores the current ownership. *)
     val lose_ownership: s -> unit
-    (** Gives the ownership of the pointed object to the caller code.
-        Equivalent to [let p = get_ptr self in lose_ownership self; p],
-        but with additional checks for the current ownership.
-        @return The pointer *)
     val grab_ownership: s -> O.t ptr
-    (** Deletes the object if required, then sets the ownership to
-        {!const:object_state.State_Owned} and returns the pointer.
-        This is only to be used in own-out function arguments
-        in the C API or equivalent.
-        @return A deleted or given-away pointer
-        @raise Invalid_access If the current state is
-        {!const:object_state.State_Dependent} *)
     val gain_ownership_back: s -> O.t ptr
     
-    (** Returns [Ctypes.is_null] on the underlying pointer, ignoring the current
-        ownership state. *)
     val is_null: s -> bool
-    (** Returns the underlying pointer, requiring a sufficient
-        ownership state.
-        @raise Invalid_access If the current state is lower than
-        {!const:object_state.State_Owned}  *)
     val get_ptr: s -> O.t ptr
-    (** Returns the underlying pointer, requiring a sufficient
-        ownership state.
-        @raise Invalid_access If the current state is lower than
-        {!const:object_state.State_Const}  *)
     val get_ptr_const: s -> O.t ptr
-    (** Inherently unsafe function that returns a given-away pointer.
-        @raise Invalid_access If the current state is not
-        {!const:object_state.State_GivenAway} *)
     val get_ptr_givenaway: s -> O.t ptr
     
-    (** Frees the underlying pointer.
-        A side effect is to mark the object as given away. *)
     val delete: s -> unit
   end
 end;;
 
-(** The implementation for ownable objects. *)
 module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
-  type s = { p: O.t ptr; mutable state: object_state; d: O.d option };;
+  type s = { p: O.t ptr; mutable state: object_state; d: O.d option }
   
   let delete self = match self.state with
     | State_Dependent _ -> () (* The object doesn't own this *)
@@ -231,7 +135,11 @@ module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
     | State_Const -> raise (Invalid_access "grab_ownership { state = State_Const }")
     | State_PassedAway ->
       raise (Invalid_access "grab_ownership { state = State_PassedAway }")
-    | State_Dependent (_, up) ->
+    | State_Dependent (_, up) -> (* TODO: what shold be done here? *)
+      (* FIXME: if this is dependent on a vector, the vector never gets deleted
+         since one element makes it completely given away.
+         Furthermore, no special check is made to ensure that the real state is
+         not PassedAway. *)
       up State_PassedAway; self.p
   let gain_ownership_back self = match self.state with
       | State_Dependent _ ->
@@ -264,15 +172,10 @@ module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
     | State_Dependent _ -> failwith "unreachable (real_state = Dependent)"
 end;;
 
-(** The API for DeclareOwn.
-    @see 'wasm.h' The OCaml implementation for the [WASM_DECLARE_OWN] macro *)
 module DECLARE_OWN(S: StructType) = struct
   module type T = sig
-    (** The structure name *)
     val name: string
-    (** The structure type (undefined) *)
     type t
-    (** The structure type (CTypes type) *)
     val t: t structure typ
     
     module O: ObjectType with type t = t structure with type d = S.d
@@ -280,7 +183,6 @@ module DECLARE_OWN(S: StructType) = struct
   end
 end;;
 
-(** The implementation for DeclareOwn structures. *)
 module DeclareOwn(T: StructType) : DECLARE_OWN(T).T = struct
   let name = "wasm_" ^ T.name
   
@@ -316,9 +218,6 @@ module DECLARE_VEC(U: VectorType) = struct
     val make_empty: unit -> s
     val make_empty_null: unit -> s (* Initializes the data field to NULL *)
     val make_uninit: int -> s
-    (*val new_empty: s -> unit
-    val new_empty_null: s -> unit (* Initializes the data field to NULL *)
-    val new_uninit: s -> int -> unit*)
     
     val duplicate: s -> s
     
@@ -376,13 +275,6 @@ module DeclareVec(T: VectorType) : DECLARE_VEC(T).T = struct
   let make_uninit n =
     let ret = make_new_st State_Owned in
     capi_new_uninitialized (get_ptr ret) (Unsigned.Size_t.of_int n); ret
-  (*let new_empty self = capi_new_empty (delete_then_new self)
-  let new_empty_null self =
-    let p = delete_then_new self in
-    p |-> fsize <-@ Unsigned.Size_t.of_int 0;
-    p |-> fdata <-@ from_voidp data_type null
-  let new_uninit self n =
-    capi_new_uninitialized (delete_then_new self) (Unsigned.Size_t.of_int n)*)
   
   let duplicate self =
     let p = get_ptr_const self in

@@ -1,0 +1,18 @@
+opam-version: "2.0"
+name: "wasmer"
+version: "dev"
+authors: ["rajdakin"]
+maintainer: "engineering@wasmer.io"
+license: "MIT"
+homepage: "https://github.com/wasmerio/wasmer-ocaml"
+doc: "https://github.com/wasmerio/wasmer-ocaml"
+bug-reports: "https://github.com/wasmerio/wasmer-ocaml/issues"
+dev-repo: "git+https://github.com/wasmerio/wasmer-ocaml.git"
+tags: ["org:wasmer"]
+
+synopsis: "The official Wasmer bindings for OCaml"
+
+depends: ["ocaml" {>= "4.14.1"} "ocamlfind" "ctypes" "libwasmer"]
+build: [[make "all"] [make "check"] {with-test}]
+build-env: [[ECHO = "true"]]
+install: [make "install"]

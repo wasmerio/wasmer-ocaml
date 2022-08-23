@@ -1,6 +1,6 @@
 open Ctypes;;
-open Wasmer_ocaml.WasmerBindings;;
-open Wasmer_ocaml.Util;;
+open Wasmer.WasmerBindings;;
+open Wasmer.Util;;
 
 (*
 This example loads a Wat script (embedded in the source code below),

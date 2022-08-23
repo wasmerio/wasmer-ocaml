@@ -1,6 +1,6 @@
 open Ctypes;;
-open Wasmer_ocaml.WasmerBindings;;
-open Wasmer_ocaml.Util;;
+open Wasmer.WasmerBindings;;
+open Wasmer.Util;;
 
 let hello_callback store args results =
   print_endline "Calling back...";

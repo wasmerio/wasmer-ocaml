@@ -1,6 +1,6 @@
 open Ctypes;;
-open Wasmer_ocaml.WasmerBindings;;
-open Wasmer_ocaml.Util;;
+open Wasmer.WasmerBindings;;
+open Wasmer.Util;;
 
 let memory_ref = ref None;;
 let print_str store args ret =

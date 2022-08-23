@@ -1,6 +1,6 @@
 open Ctypes;;
-open Wasmer_ocaml.WasmerBindings;;
-open Wasmer_ocaml.Util;;
+open Wasmer.WasmerBindings;;
+open Wasmer.Util;;
 
 (* The API prevents deleting a vector if its ownership has been taken away.
    Thus, a call to Imports.delete imports, after the instance has been created,

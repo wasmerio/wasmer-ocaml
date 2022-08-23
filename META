@@ -1,0 +1,7 @@
+requires = "ctypes ctypes.foreign"
+description = "The official Wasmer bindings for OCaml"
+version = "1.0.0"
+
+archive(byte) = "Wasmer.cma"
+archive(native) = "Wasmer.cmxa"
+plugin = "Wasmer.cmxs"

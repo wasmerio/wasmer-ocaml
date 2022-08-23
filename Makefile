@@ -1,395 +1,330 @@
 ROOT:=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-OCAMLC?=ocamlc
-OCAMLOPT?=ocamlopt
+OCAMLFIND?=ocamlfind
 OCAMLDEP?=ocamldep
 
-INCLUDES:= \
-	-I $(OPAM_SWITCH_PREFIX)/lib/bigarray-compat \
-	-I $(OPAM_SWITCH_PREFIX)/lib/bytes \
-	-I $(OPAM_SWITCH_PREFIX)/lib/ctypes \
-	-I $(OPAM_SWITCH_PREFIX)/lib/integers \
-	-I $(OPAM_SWITCH_PREFIX)/lib/ocaml
+OCAMLFINDFLAGS+=-package ctypes,ctypes.foreign
 OCAMLFLAGS+=-strict-sequence -strict-formats \
 	-short-paths -keep-locs \
-	-g
+	-g \
+	-thread
 
 ifeq ($(SILENT),0)
 SILENCER:=
 else
 SILENCER:=@
 endif
+ECHO?=echo
 
 all:
 .PHONY: all
 
 
-LIB_INTERFACE:=lib/Wasmer_ocaml.cmi lib/Wasmer_ocaml__WasmerBindings.cmi lib/Wasmer_ocaml__Util.cmi
+doc:
+	$(SILENCER)$(OCAMLFIND) ocamldoc $(OCAMLFINDFLAGS) \
+		src/lib/wasmerBindings.mli -html -d html_out -colorize-code
+
+
+LIB_INTERFACE:=lib/Wasmer.cmi lib/Wasmer__WasmerBindings.cmi lib/Wasmer__Util.cmi
 TESTS:=test/instance/instance test/hello/hello
 EXAMPLES:=examples/hello examples/instance examples/rust
 
-all: wasmer_ocaml $(TESTS)
+all: wasmer $(TESTS)
 
-wasmer_ocaml: lib/Wasmer_ocaml.cmxs lib/Wasmer_ocaml.cmxa lib/Wasmer_ocaml.cma
-.PHONY: wasmer_ocaml
+wasmer: lib/Wasmer.cmxs lib/Wasmer.cmxa lib/Wasmer.cma
+.PHONY: wasmer
 
-obj/lib/Wasmer_ocaml.ml: src/lib/wasmer_ocaml.ml
-	@echo "Copying Wasmer_ocaml ml to the obj directory"
-	$(SILENCER)cp src/lib/wasmer_ocaml.ml obj/lib/Wasmer_ocaml.ml
-obj/lib/Wasmer_ocaml__WasmerBindings.ml: src/lib/wasmerBindings.ml
-	@echo "Copying Wasmer_ocaml.WasmerBindings ml to the obj directory"
-	$(SILENCER)cp src/lib/wasmerBindings.ml obj/lib/Wasmer_ocaml__WasmerBindings.ml
-obj/lib/Wasmer_ocaml__WasmerBindings.mli: src/lib/wasmerBindings.mli
-	@echo "Copying Wasmer_ocaml.WasmerBindings mli to the obj directory"
-	$(SILENCER)cp src/lib/wasmerBindings.mli obj/lib/Wasmer_ocaml__WasmerBindings.mli
-obj/lib/Wasmer_ocaml__Util.ml: src/lib/util.ml
-	@echo "Copying Wasmer_ocaml.Util ml to the obj directory"
-	$(SILENCER)cp src/lib/util.ml obj/lib/Wasmer_ocaml__Util.ml
-obj/lib/Wasmer_ocaml__Util.mli: src/lib/util.mli
-	@echo "Copying Wasmer_ocaml.Util mli to the obj directory"
-	$(SILENCER)cp src/lib/util.mli obj/lib/Wasmer_ocaml__Util.mli
+obj/lib/Wasmer.ml: src/lib/wasmer.ml
+	@$(ECHO) "Copying Wasmer ml to the obj directory"
+	$(SILENCER)cp src/lib/wasmer.ml obj/lib/Wasmer.ml
+obj/lib/Wasmer__WasmerBindings.ml: src/lib/wasmerBindings.ml
+	@$(ECHO) "Copying Wasmer.WasmerBindings ml to the obj directory"
+	$(SILENCER)cp src/lib/wasmerBindings.ml obj/lib/Wasmer__WasmerBindings.ml
+obj/lib/Wasmer__WasmerBindings.mli: src/lib/wasmerBindings.mli
+	@$(ECHO) "Copying Wasmer.WasmerBindings mli to the obj directory"
+	$(SILENCER)cp src/lib/wasmerBindings.mli obj/lib/Wasmer__WasmerBindings.mli
+obj/lib/Wasmer__Util.ml: src/lib/util.ml
+	@$(ECHO) "Copying Wasmer.Util ml to the obj directory"
+	$(SILENCER)cp src/lib/util.ml obj/lib/Wasmer__Util.ml
+obj/lib/Wasmer__Util.mli: src/lib/util.mli
+	@$(ECHO) "Copying Wasmer.Util mli to the obj directory"
+	$(SILENCER)cp src/lib/util.mli obj/lib/Wasmer__Util.mli
 
-obj/lib/Wasmer_ocaml__WasmerBindings.cmi: obj/lib/Wasmer_ocaml__WasmerBindings.mli
-	@echo "Compiling the Wasmer_ocaml.WasmerBindings cmi"
-	$(SILENCER)$(OCAMLC) \
-		$(OCAMLFLAGS) \
+obj/lib/Wasmer__WasmerBindings.cmi: obj/lib/Wasmer__WasmerBindings.mli
+	@$(ECHO) "Compiling the Wasmer.WasmerBindings cmi"
+	$(SILENCER)$(OCAMLFIND) ocamlc $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-opaque \
 		-I obj/lib \
-		$(INCLUDES) \
 		-no-alias-deps \
-		-o obj/lib/Wasmer_ocaml__WasmerBindings.cmi \
-		obj/lib/Wasmer_ocaml__WasmerBindings.mli
+		-o obj/lib/Wasmer__WasmerBindings.cmi \
+		obj/lib/Wasmer__WasmerBindings.mli
 
-obj/lib/Wasmer_ocaml__WasmerBindings.cmo: obj/lib/Wasmer_ocaml__WasmerBindings.ml obj/lib/Wasmer_ocaml__WasmerBindings.cmi
-	@echo "Compiling the Wasmer_ocaml.WasmerBindings cmo"
-	$(SILENCER)$(OCAMLC) \
-		$(OCAMLFLAGS) \
+obj/lib/Wasmer__WasmerBindings.cmo: obj/lib/Wasmer__WasmerBindings.ml obj/lib/Wasmer__WasmerBindings.cmi
+	@$(ECHO) "Compiling the Wasmer.WasmerBindings cmo"
+	$(SILENCER)$(OCAMLFIND) ocamlc $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-opaque \
 		-I obj/lib \
-		$(INCLUDES) \
 		-no-alias-deps \
-		-o obj/lib/Wasmer_ocaml__WasmerBindings.cmo \
-		-c obj/lib/Wasmer_ocaml__WasmerBindings.ml
+		-o obj/lib/Wasmer__WasmerBindings.cmo \
+		-c obj/lib/Wasmer__WasmerBindings.ml
 
-obj/lib/Wasmer_ocaml__WasmerBindings.cmx: obj/lib/Wasmer_ocaml__WasmerBindings.ml obj/lib/Wasmer_ocaml__WasmerBindings.cmi
-	@echo "Compiling the Wasmer_ocaml.WasmerBindings cmx"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
+obj/lib/Wasmer__WasmerBindings.cmx: obj/lib/Wasmer__WasmerBindings.ml obj/lib/Wasmer__WasmerBindings.cmi
+	@$(ECHO) "Compiling the Wasmer.WasmerBindings cmx"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-opaque \
 		-I obj/lib \
-		$(INCLUDES) \
 		-no-alias-deps \
-		-o obj/lib/Wasmer_ocaml__WasmerBindings.cmx \
-		-c obj/lib/Wasmer_ocaml__WasmerBindings.ml
+		-o obj/lib/Wasmer__WasmerBindings.cmx \
+		-c obj/lib/Wasmer__WasmerBindings.ml
 
-obj/lib/Wasmer_ocaml__Util.cmi: obj/lib/Wasmer_ocaml__Util.mli obj/lib/Wasmer_ocaml__WasmerBindings.cmi
-	@echo "Compiling the Wasmer_ocaml.Util cmi"
-	$(SILENCER)$(OCAMLC) \
-		$(OCAMLFLAGS) \
+obj/lib/Wasmer__Util.cmi: obj/lib/Wasmer__Util.mli obj/lib/Wasmer__WasmerBindings.cmi
+	@$(ECHO) "Compiling the Wasmer.Util cmi"
+	$(SILENCER)$(OCAMLFIND) ocamlc $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-opaque \
 		-I obj/lib \
-		$(INCLUDES) \
 		-no-alias-deps \
-		-o obj/lib/Wasmer_ocaml__Util.cmi \
-		obj/lib/Wasmer_ocaml__Util.mli
+		-o obj/lib/Wasmer__Util.cmi \
+		obj/lib/Wasmer__Util.mli
 
-obj/lib/Wasmer_ocaml__Util.cmo: obj/lib/Wasmer_ocaml__Util.ml obj/lib/Wasmer_ocaml__Util.cmi obj/lib/Wasmer_ocaml__WasmerBindings.cmo
-	@echo "Compiling the Wasmer_ocaml.Util cmo"
-	$(SILENCER)$(OCAMLC) \
-		$(OCAMLFLAGS) \
+obj/lib/Wasmer__Util.cmo: obj/lib/Wasmer__Util.ml obj/lib/Wasmer__Util.cmi obj/lib/Wasmer__WasmerBindings.cmo
+	@$(ECHO) "Compiling the Wasmer.Util cmo"
+	$(SILENCER)$(OCAMLFIND) ocamlc $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-opaque \
 		-I obj/lib \
-		$(INCLUDES) \
 		-no-alias-deps \
-		-o obj/lib/Wasmer_ocaml__Util.cmo \
-		-c obj/lib/Wasmer_ocaml__Util.ml
+		-o obj/lib/Wasmer__Util.cmo \
+		-c obj/lib/Wasmer__Util.ml
 
-obj/lib/Wasmer_ocaml__Util.cmx: obj/lib/Wasmer_ocaml__Util.ml obj/lib/Wasmer_ocaml__Util.cmi obj/lib/Wasmer_ocaml__WasmerBindings.cmx
-	@echo "Compiling the Wasmer_ocaml.Util cmx"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
+obj/lib/Wasmer__Util.cmx: obj/lib/Wasmer__Util.ml obj/lib/Wasmer__Util.cmi obj/lib/Wasmer__WasmerBindings.cmx
+	@$(ECHO) "Compiling the Wasmer.Util cmx"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-opaque \
 		-I obj/lib \
-		$(INCLUDES) \
 		-no-alias-deps \
-		-o obj/lib/Wasmer_ocaml__Util.cmx \
-		-c obj/lib/Wasmer_ocaml__Util.ml
+		-o obj/lib/Wasmer__Util.cmx \
+		-c obj/lib/Wasmer__Util.ml
 
-obj/lib/Wasmer_ocaml.cmo: obj/lib/Wasmer_ocaml.ml obj/lib/Wasmer_ocaml__WasmerBindings.cmi obj/lib/Wasmer_ocaml__Util.cmi
-	@echo "Compiling the Wasmer_ocaml cmo"
-	$(SILENCER)$(OCAMLC) \
-		$(OCAMLFLAGS) \
+obj/lib/Wasmer.cmo: obj/lib/Wasmer.ml obj/lib/Wasmer__WasmerBindings.cmi obj/lib/Wasmer__Util.cmi
+	@$(ECHO) "Compiling the Wasmer cmo"
+	$(SILENCER)$(OCAMLFIND) ocamlc $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I obj/lib \
 		-nopervasives -nostdlib \
 		-no-alias-deps \
-		-o obj/lib/Wasmer_ocaml.cmo \
-		-c obj/lib/Wasmer_ocaml.ml
+		-o obj/lib/Wasmer.cmo \
+		-c obj/lib/Wasmer.ml
 
-obj/lib/Wasmer_ocaml.cmx: obj/lib/Wasmer_ocaml.ml obj/lib/Wasmer_ocaml__WasmerBindings.cmi obj/lib/Wasmer_ocaml__Util.cmi
-	@echo "Compiling the Wasmer_ocaml cmx"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
+obj/lib/Wasmer.cmx: obj/lib/Wasmer.ml obj/lib/Wasmer__WasmerBindings.cmi obj/lib/Wasmer__Util.cmi
+	@$(ECHO) "Compiling the Wasmer cmx"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-nopervasives -nostdlib \
 		-I obj/lib \
 		-no-alias-deps \
-		-o obj/lib/Wasmer_ocaml.cmx \
-		-c obj/lib/Wasmer_ocaml.ml
+		-o obj/lib/Wasmer.cmx \
+		-c obj/lib/Wasmer.ml
 
 # Dummy placeholder (the cmi is automatically generated by either the cmx or the cmo)
-obj/lib/Wasmer_ocaml.cmi: obj/lib/Wasmer_ocaml.cmx
-lib/Wasmer_ocaml.cmi: obj/lib/Wasmer_ocaml.cmi
-	@echo "Copying the Wasmer_ocaml cmi to lib"
-	$(SILENCER)cp obj/lib/Wasmer_ocaml.cmi lib/Wasmer_ocaml.cmi
-lib/Wasmer_ocaml__WasmerBindings.cmi: obj/lib/Wasmer_ocaml__WasmerBindings.cmi
-	@echo "Copying the Wasmer_ocaml.WasmerBindings cmi to lib"
-	$(SILENCER)cp obj/lib/Wasmer_ocaml__WasmerBindings.cmi lib/Wasmer_ocaml__WasmerBindings.cmi
-lib/Wasmer_ocaml__Util.cmi: obj/lib/Wasmer_ocaml__Util.cmi
-	@echo "Copying the Wasmer_ocaml.Util cmi to lib"
-	$(SILENCER)cp obj/lib/Wasmer_ocaml__Util.cmi lib/Wasmer_ocaml__Util.cmi
+obj/lib/Wasmer.cmi: obj/lib/Wasmer.cmx
+lib/Wasmer.cmi: obj/lib/Wasmer.cmi
+	@$(ECHO) "Copying the Wasmer cmi to lib"
+	$(SILENCER)cp obj/lib/Wasmer.cmi lib/Wasmer.cmi
+lib/Wasmer__WasmerBindings.cmi: obj/lib/Wasmer__WasmerBindings.cmi
+	@$(ECHO) "Copying the Wasmer.WasmerBindings cmi to lib"
+	$(SILENCER)cp obj/lib/Wasmer__WasmerBindings.cmi lib/Wasmer__WasmerBindings.cmi
+lib/Wasmer__Util.cmi: obj/lib/Wasmer__Util.cmi
+	@$(ECHO) "Copying the Wasmer.Util cmi to lib"
+	$(SILENCER)cp obj/lib/Wasmer__Util.cmi lib/Wasmer__Util.cmi
 
 obj/lib/wasmerBindings.o: src/lib/wasmerBindings.c
-	@echo "Compiling WasmerBindings object file with CFLAGS=$(CFLAGS)"
+	@$(ECHO) "Compiling WasmerBindings object file with CFLAGS=$(CFLAGS)"
 	$(SILENCER)$(CC) $(CFLAGS) -c src/lib/wasmerBindings.c -o obj/lib/wasmerBindings.o
 
-lib/Wasmer_ocaml.cma: obj/lib/wasmerBindings.o obj/lib/Wasmer_ocaml.cmo obj/lib/Wasmer_ocaml__WasmerBindings.cmo obj/lib/Wasmer_ocaml__Util.cmo
-	@echo "Compiling Wasmer_ocaml cma"
-	$(SILENCER)$(OCAMLC) \
-		$(OCAMLFLAGS) \
+lib/Wasmer.cma: obj/lib/wasmerBindings.o obj/lib/Wasmer.cmo obj/lib/Wasmer__WasmerBindings.cmo obj/lib/Wasmer__Util.cmo
+	@$(ECHO) "Compiling Wasmer cma"
+	$(SILENCER)$(OCAMLFIND) ocamlc $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-a \
-		-o lib/Wasmer_ocaml.cma \
+		-o lib/Wasmer.cma \
 		obj/lib/wasmerBindings.o \
 		-cclib -lwasmer -ccopt -L$(ROOT)lib \
-		obj/lib/Wasmer_ocaml.cmo \
-		obj/lib/Wasmer_ocaml__WasmerBindings.cmo \
-		obj/lib/Wasmer_ocaml__Util.cmo
+		obj/lib/Wasmer.cmo \
+		obj/lib/Wasmer__WasmerBindings.cmo \
+		obj/lib/Wasmer__Util.cmo
 
-lib/Wasmer_ocaml.cmxa: obj/lib/wasmerBindings.o obj/lib/Wasmer_ocaml.cmx obj/lib/Wasmer_ocaml__WasmerBindings.cmx obj/lib/Wasmer_ocaml__Util.cmx
-	@echo "Compiling Wasmer_ocaml cmxa"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
+lib/Wasmer.cmxa: obj/lib/wasmerBindings.o obj/lib/Wasmer.cmx obj/lib/Wasmer__WasmerBindings.cmx obj/lib/Wasmer__Util.cmx
+	@$(ECHO) "Compiling Wasmer cmxa"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-a \
-		-o lib/Wasmer_ocaml.cmxa \
+		-o lib/Wasmer.cmxa \
 		obj/lib/wasmerBindings.o \
 		-cclib -lwasmer -ccopt -L$(ROOT)lib \
-		obj/lib/Wasmer_ocaml.cmx \
-		obj/lib/Wasmer_ocaml__WasmerBindings.cmx \
-		obj/lib/Wasmer_ocaml__Util.cmx
+		obj/lib/Wasmer.cmx \
+		obj/lib/Wasmer__WasmerBindings.cmx \
+		obj/lib/Wasmer__Util.cmx
 
-lib/Wasmer_ocaml.cmxs: lib/Wasmer_ocaml.cmxa
-	@echo "Compiling Wasmer_ocaml cmxs"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) -shared -linkall \
+lib/Wasmer.cmxs: lib/Wasmer.cmxa
+	@$(ECHO) "Compiling Wasmer cmxs"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
+		-shared -linkall \
 		-I obj/lib \
-		-o lib/Wasmer_ocaml.cmxs \
-		lib/Wasmer_ocaml.cmxa
+		-o lib/Wasmer.cmxs \
+		lib/Wasmer.cmxa
 
 
 obj/test/hello/hello.cmo: $(LIB_INTERFACE) src/test/hello/hello.ml
-	@echo "Compiling test 'hello' cmo"
-	$(SILENCER)$(OCAMLC) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+	@$(ECHO) "Compiling test 'hello' cmo"
+	$(SILENCER)$(OCAMLFIND) ocamlc $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-no-alias-deps \
 		-o obj/test/hello/hello.cmo \
 		-c src/test/hello/hello.ml
 obj/test/hello/hello.cmx: $(LIB_INTERFACE) src/test/hello/hello.ml
-	@echo "Compiling test 'hello' cmx"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+	@$(ECHO) "Compiling test 'hello' cmx"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-no-alias-deps \
 		-o obj/test/hello/hello.cmx \
 		-c src/test/hello/hello.ml
 
 test/hello/hello.wasm: src/test/hello/hello.wasm
-	@echo "Copying hello.wasm to the 'hello' test directory"
+	@$(ECHO) "Copying hello.wasm to the 'hello' test directory"
 	$(SILENCER)cp src/test/hello/hello.wasm test/hello/hello.wasm
 
-test/hello/hello: lib/Wasmer_ocaml.cmxa obj/test/hello/hello.cmx test/hello/hello.wasm
-	@echo "Compiling test 'hello'"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+test/hello/hello: lib/Wasmer.cmxa obj/test/hello/hello.cmx test/hello/hello.wasm
+	@$(ECHO) "Compiling test 'hello'"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-o test/hello/hello \
-		$(OPAM_SWITCH_PREFIX)/lib/bigarray-compat/bigarray_compat.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/integers/integers.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ocaml/unix.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ocaml/threads/threads.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes-foreign.cmxa \
-		lib/Wasmer_ocaml.cmxa \
+		-linkpkg \
+		lib/Wasmer.cmxa \
 		obj/test/hello/hello.cmx
 
 obj/test/instance/instance.cmo: $(LIB_INTERFACE) src/test/instance/instance.ml
-	@echo "Compiling test 'instance' cmo"
-	$(SILENCER)$(OCAMLC) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+	@$(ECHO) "Compiling test 'instance' cmo"
+	$(SILENCER)$(OCAMLFIND) ocamlc $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-no-alias-deps \
 		-o obj/test/instance/instance.cmo \
 		-c src/test/instance/instance.ml
 obj/test/instance/instance.cmx: $(LIB_INTERFACE) src/test/instance/instance.ml
-	@echo "Compiling test 'instance' cmx"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+	@$(ECHO) "Compiling test 'instance' cmx"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-no-alias-deps \
 		-o obj/test/instance/instance.cmx \
 		-c src/test/instance/instance.ml
 
-test/instance/instance: lib/Wasmer_ocaml.cmxa obj/test/instance/instance.cmx
-	@echo "Compiling test 'instance'"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+test/instance/instance: lib/Wasmer.cmxa obj/test/instance/instance.cmx
+	@$(ECHO) "Compiling test 'instance'"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-o test/instance/instance \
-		$(OPAM_SWITCH_PREFIX)/lib/bigarray-compat/bigarray_compat.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/integers/integers.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ocaml/unix.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ocaml/threads/threads.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes-foreign.cmxa \
-		lib/Wasmer_ocaml.cmxa \
+		-linkpkg \
+		lib/Wasmer.cmxa \
 		obj/test/instance/instance.cmx
 
 obj/examples/hello.cmo: $(LIB_INTERFACE) examples/hello.ml
-	@echo "Compiling example 'hello' cmo"
-	$(SILENCER)$(OCAMLC) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+	@$(ECHO) "Compiling example 'hello' cmo"
+	$(SILENCER)$(OCAMLFIND) ocamlc $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-no-alias-deps \
 		-o obj/examples/hello.cmo \
 		-c examples/hello.ml
 obj/examples/hello.cmx: $(LIB_INTERFACE) examples/hello.ml
-	@echo "Compiling example 'hello' cmx"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+	@$(ECHO) "Compiling example 'hello' cmx"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-no-alias-deps \
 		-o obj/examples/hello.cmx \
 		-c examples/hello.ml
 
-examples/hello: lib/Wasmer_ocaml.cmxa obj/examples/hello.cmx
-	@echo "Compiling example 'hello'"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+examples/hello: lib/Wasmer.cmxa obj/examples/hello.cmx
+	@$(ECHO) "Compiling example 'hello'"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-o examples/hello \
-		$(OPAM_SWITCH_PREFIX)/lib/bigarray-compat/bigarray_compat.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/integers/integers.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ocaml/unix.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ocaml/threads/threads.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes-foreign.cmxa \
-		lib/Wasmer_ocaml.cmxa \
+		-linkpkg \
+		lib/Wasmer.cmxa \
 		obj/examples/hello.cmx
 
 obj/examples/instance.cmo: $(LIB_INTERFACE) examples/instance.ml
-	@echo "Compiling example 'instance' cmo"
-	$(SILENCER)$(OCAMLC) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+	@$(ECHO) "Compiling example 'instance' cmo"
+	$(SILENCER)$(OCAMLFIND) ocamlc $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-no-alias-deps \
 		-o obj/examples/instance.cmo \
 		-c examples/instance.ml
 obj/examples/instance.cmx: $(LIB_INTERFACE) examples/instance.ml
-	@echo "Compiling example 'instance' cmx"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+	@$(ECHO) "Compiling example 'instance' cmx"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-no-alias-deps \
 		-o obj/examples/instance.cmx \
 		-c examples/instance.ml
 
-examples/instance: lib/Wasmer_ocaml.cmxa obj/examples/instance.cmx
-	@echo "Compiling example 'instance'"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+examples/instance: lib/Wasmer.cmxa obj/examples/instance.cmx
+	@$(ECHO) "Compiling example 'instance'"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-o examples/instance \
-		$(OPAM_SWITCH_PREFIX)/lib/bigarray-compat/bigarray_compat.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/integers/integers.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ocaml/unix.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ocaml/threads/threads.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes-foreign.cmxa \
-		lib/Wasmer_ocaml.cmxa \
+		-linkpkg \
+		lib/Wasmer.cmxa \
 		obj/examples/instance.cmx
 obj/examples/rust.cmo: $(LIB_INTERFACE) examples/rust.ml
-	@echo "Compiling example 'rust' cmo"
-	$(SILENCER)$(OCAMLC) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+	@$(ECHO) "Compiling example 'rust' cmo"
+	$(SILENCER)$(OCAMLFIND) ocamlc $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-no-alias-deps \
 		-o obj/examples/rust.cmo \
 		-c examples/rust.ml
 obj/examples/rust.cmx: $(LIB_INTERFACE) examples/rust.ml
-	@echo "Compiling example 'rust' cmx"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+	@$(ECHO) "Compiling example 'rust' cmx"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-no-alias-deps \
 		-o obj/examples/rust.cmx \
 		-c examples/rust.ml
 
 examples/rust-wasm/target/wasm32-unknown-unknown/release/rust_integration.wasm:
-	@echo "Compiling the rust_integration.wasm for example 'rust'"
+	@$(ECHO) "Compiling the rust_integration.wasm for example 'rust'"
 	$(SILENCER)cd examples; cd rust-wasm; cargo build --target=wasmtime-unknown-unknown --release
 
-examples/rust: lib/Wasmer_ocaml.cmxa obj/examples/rust.cmx examples/rust-wasm/target/wasm32-unknown-unknown/release/rust_integration.wasm
-	@echo "Compiling example 'rust'"
-	$(SILENCER)$(OCAMLOPT) \
-		$(OCAMLFLAGS) \
-		$(INCLUDES) \
+examples/rust: lib/Wasmer.cmxa obj/examples/rust.cmx examples/rust-wasm/target/wasm32-unknown-unknown/release/rust_integration.wasm
+	@$(ECHO) "Compiling example 'rust'"
+	$(SILENCER)$(OCAMLFIND) ocamlopt $(OCAMLFINDFLAGS) $(OCAMLFLAGS) \
 		-I lib \
 		-o examples/rust \
-		$(OPAM_SWITCH_PREFIX)/lib/bigarray-compat/bigarray_compat.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/integers/integers.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ocaml/unix.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ocaml/threads/threads.cmxa \
-		$(OPAM_SWITCH_PREFIX)/lib/ctypes/ctypes-foreign.cmxa \
-		lib/Wasmer_ocaml.cmxa \
+		-linkpkg \
+		lib/Wasmer.cmxa \
 		obj/examples/rust.cmx
 
 # OCaml bug: the sigaltstack can't be changed by an external library
-# or the program will crash on exit
+# or the program will crash on exit:
 # https://github.com/ocaml/ocaml/issues/11489
-# Should be fixed by OCaml 4.14 (#11496) and OCaml 5.0
+# It is fixed by OCaml 4.14 (#11496) and should be fixed in OCaml 5.0.
+# If the tests fails because of this, update your OCaml version.
 check: $(TESTS)
-	@echo "Reminder: segmentation fault errors when exiting are known and an OCaml bug."
-	-echo; echo Test: instance; cd test; cd instance; ./instance
-	-echo; echo Test: hello; cd test; cd hello; ./hello
+	@$(ECHO) "Reminder: segmentation fault errors when exiting are known and an OCaml pre-4.14.1 bug."
+	@$(ECHO); $(ECHO) Test: instance; cd test; cd instance; ./instance
+	@$(ECHO); $(ECHO) Test: hello; cd test; cd hello; ./hello
 
 examples: $(EXAMPLES)
-	@echo "Reminder: segmentation fault errors when exiting are known and an OCaml bug."
-	-echo; echo Example: hello; cd examples; ./hello
-	-echo; echo Example: instance; cd examples; ./instance
-	-echo; echo Example: rust; cd examples; ./rust
+	@$(ECHO) "Reminder: segmentation fault errors when exiting are known and an OCaml pre-4.14.1 bug."
+	@$(ECHO); $(ECHO) Example: hello; cd examples; ./hello
+	@$(ECHO); $(ECHO) Example: instance; cd examples; ./instance
+	@$(ECHO); $(ECHO) Example: rust; cd examples; ./rust
 .PHONY: examples
 
 clean:
 # Output
 	$(RM) obj/lib/*
 	$(SILENCER)touch obj/lib/.gitkeep
-	$(RM) lib/Wasmer_ocaml*
+	$(RM) lib/*
 	$(SILENCER)touch lib/.gitkeep
 	
 # Tests
-	$(RM) obj/test/hello/* obj/test/instance/*
-	$(SILENCER)touch obj/test/hello/.gitkeep obj/test/instance/.gitkeep
+	$(RM) obj/test/hello/* obj/test/instance/* obj/examples/*
+	$(SILENCER)touch obj/test/hello/.gitkeep obj/test/instance/.gitkeep obj/examples/.gitkeep
 	$(RM) $(TESTS) $(EXAMPLES)
+
+install:
+	-$(SILENCER)$(OCAMLFIND) remove wasmer
+	$(SILENCER)$(OCAMLFIND) install wasmer META lib/Wasmer.cmi lib/Wasmer__WasmerBindings.cmi lib/Wasmer__Util.cmi lib/Wasmer.a lib/Wasmer.cma lib/Wasmer.cmxa lib/Wasmer.cmxs	

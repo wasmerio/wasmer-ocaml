@@ -7,7 +7,7 @@ This is the (official) OCaml bindings for Wasmer.
 ## Compiling
 
 To compile the library, simply run `make`. An OCaml library
-(`Wasmer_ocaml.cmxa`) will be generated in the `lib` folder.
+(`Wasmer.cmxa`) will be generated in the `lib` folder.
 A bytecode archive (`.cma`) and a dynamically-linkable library will also be
 generated.
 
@@ -29,7 +29,3 @@ library with `make CFLAGS=-DWASM_IMPORT_ALL`.
 
 To run, you need to have the Wasmer C API available for the linker to get.
 The library is entirely available in the `lib` folder after compiling.
-
-# Issue
-
-Currently (Tue, Aug 16 2022), OCaml has a bug that makes the program crash on exiting. The issue has been [reported to OCaml](https://github.com/ocaml/ocaml/issues/11489), and (is being fixed for OCaml 4.14)[https://github.com/ocaml/ocaml/pull/11496].

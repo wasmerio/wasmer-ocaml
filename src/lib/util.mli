@@ -1,5 +1,5 @@
 open Ctypes;;
-open Wasmer_ocaml__WasmerBindings;;
+open Wasmer__WasmerBindings;;
 
 val wat2wasm: string -> Byte.Vec.s -> unit;;
 val wasm_of_wat: string -> Byte.Vec.s;;
