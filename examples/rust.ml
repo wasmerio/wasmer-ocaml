@@ -1,5 +1,5 @@
 open Ctypes;;
-open Wasmer.WasmerBindings;;
+open Wasmer;;
 open Wasmer.Util;;
 
 let memory_ref = ref None;;

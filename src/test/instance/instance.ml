@@ -1,5 +1,5 @@
 open Ctypes;;
-open Wasmer.WasmerBindings;;
+open Wasmer;;
 open Wasmer.Util;;
 
 (* The API prevents deleting a vector if its ownership has been taken away.

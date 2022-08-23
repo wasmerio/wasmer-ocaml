@@ -1,5 +1,5 @@
 open Ctypes;;
-open Wasmer.WasmerBindings;;
+open Wasmer;;
 open Wasmer.Util;;
 
 let hello_callback store args results =
