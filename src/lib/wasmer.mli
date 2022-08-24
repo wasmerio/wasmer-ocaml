@@ -761,6 +761,85 @@ module Wasi : sig
     (* TODO: all other wasi_config_* functions *)
   end
   
+  (* Enabled only if WASMER_WASI_ENABLED was defined at the C API library compile time *)
+  (* Enabled only if WASMER_WASI_ENABLED was defined at the C API library compile time *)
+  module NamedExtern_T : sig
+    val name: string
+  end
+  module NamedExtern : sig
+    val name: string
+    
+    type t
+    val t: t structure typ
+    
+    type t_bis = t
+    module O : sig
+      type t = t_bis structure
+      type d = unit
+      
+      val make: unit -> t ptr
+      val delete: t ptr -> unit
+    end
+    include module type of struct include OwnableObject(O) end
+    
+    val get_module: s -> Name.s
+    val get_name: s -> Name.s
+    val get_unwrap: s -> Extern.s
+    
+    module V : sig
+      type data_type = t structure ptr
+      val data_type: data_type typ
+      
+      val name: string
+      
+      type owning_struct = s
+      val grab_ownership: owning_struct -> data_type
+      val to_dependent:
+        data_type ->
+          (unit -> object_state) * object_state dependent_update_func -> owning_struct
+    end
+    module Vec : sig
+      type data_type = V.data_type
+      val data_type: data_type typ
+      
+      val name: string
+      
+      type t
+      val t: t structure typ
+      val fsize: (Uintptr.t, t structure) field
+      val fdata: (data_type ptr, t structure) field
+      
+      type t_bis = t
+      module O : sig
+        type t = t_bis structure
+        type d = unit
+        
+        val make: unit -> t ptr
+        val delete: t ptr -> unit
+      end
+      include module type of struct include OwnableObject(O) end
+      
+      val make_empty: unit -> s
+      val make_empty_null: unit -> s
+      val make_uninit: int -> s
+      
+      val duplicate: s -> s
+      
+      val of_array: V.owning_struct array -> s
+      val of_list: V.owning_struct list -> s
+      
+      val get_size: s -> int
+      val get_element: s -> int -> V.owning_struct
+      val get_element_unsafe: s -> int -> V.owning_struct
+      val get_element_const: s -> int -> V.owning_struct
+      val get_element_const_unsafe: s -> int -> V.owning_struct
+      val set_element: s -> int -> V.owning_struct -> unit
+      val set_element_unsafe: s -> int -> V.owning_struct -> unit
+      
+      val get_named_element: s -> string -> V.owning_struct option
+    end
+  end
+  
   include module type of struct include Wasi_ end
   module Env_T : sig
     type t = Env_O_._t
@@ -774,6 +853,7 @@ module Wasi : sig
     val new_: Store.s -> Config.s -> s
     val new_unsafe: Store.s -> Config.s -> s
     val get_imports: Store.s -> s -> Module.s -> Extern.Vec.s option
+    val get_unordered_imports: s -> Module.s -> NamedExtern.Vec.s option
   end
 end;;
 

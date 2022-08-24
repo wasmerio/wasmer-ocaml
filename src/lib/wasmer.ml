@@ -1831,7 +1831,7 @@ module Wasi = struct
     let name = "wasi_config"
     
     type t
-    let t: t structure typ = structure name
+    let t: t structure typ = structure (name ^ "_t")
     
     type t_bis = t
     module O = struct
@@ -1840,7 +1840,7 @@ module Wasi = struct
       
       let make () = addr (make t)
       let delete ptr =
-        (* TODO: panic? (There is no wasi_config_new) *) ()
+        (* TODO: panic? (There is no wasi_config_delete) *) ()
     end
     include OwnableObject(O)
     
@@ -1848,6 +1848,141 @@ module Wasi = struct
     let new_ name = make_from_raise (capi_new name) State_Owned
     let new_unsafe name = make_from_unsafe (capi_new name) State_Owned
     (* TODO: all other wasi_config_* functions *)
+  end
+  
+  (* Enabled only if WASMER_WASI_ENABLED was defined at the C API library compile time *)
+  module NamedExtern_T = struct
+    let name = "named_extern"
+  end
+  module NamedExtern = struct
+    let name = "wasmer_named_extern"
+    
+    type t
+    let t: t structure typ = structure (name ^ "_t")
+    
+    type t_bis = t
+    module O = struct
+      type t = t_bis structure
+      type d = unit
+      
+      let make () = addr (make t)
+      let delete ptr =
+        (* TODO: panic? (There is no wasi_named_extern_delete) *) ()
+    end
+    include OwnableObject(O)
+    
+    let capi_module =
+      foreign ~stub:true (name ^ "_module") (ptr t @-> returning (ptr Name.t))
+    let capi_name = foreign ~stub:true (name ^ "_name") (ptr t @-> returning (ptr Name.t))
+    let capi_unwrap = foreign ~stub:true (name ^ "_unwrap")
+        (ptr t @-> returning (ptr Extern.t))
+    
+    let get_module self =
+      Name.make_from_raise (capi_module (get_ptr_const self)) State_Const
+    let get_name self = Name.make_from_raise (capi_name (get_ptr_const self)) State_Const
+    let get_unwrap self =
+      Extern.make_from_raise (capi_unwrap (get_ptr_const self)) State_Const
+    
+    module V = struct
+      type data_type = t structure ptr
+      let data_type = ptr t
+      
+      let name = "named_extern"
+      
+      type owning_struct = s
+      let grab_ownership s = grab_ownership s
+      let to_dependent p f = make_from_unsafe p (State_Dependent f)
+    end
+    module Vec = struct
+      type data_type = V.data_type
+      let data_type = V.data_type
+      
+      let name = "wasmer_named_extern_vec"
+      
+      type t
+      let t: t structure typ = structure (name ^ "_t")
+      let fsize = field t "size" uintptr_t
+      let fdata = field t "data" (ptr data_type)
+      let () = seal t
+      
+      type t_bis = t
+      module O = struct
+        type t = t_bis structure
+        type d = unit
+        
+        let make () = addr (make t)
+        let delete =
+          foreign ~stub:true "wasmer_named_extern_vec_delete" (ptr t @-> returning void)
+      end
+      include OwnableObject(O)
+      
+      let capi_new_empty = foreign ~stub:true (name ^ "_new_empty") (ptr t @-> returning void)
+      let capi_new_uninitialized = foreign ~stub:true (name ^ "_new_uninitialized")
+          (ptr t @-> uintptr_t @-> returning void)
+      let capi_new = foreign ~stub:true (name ^ "_new")
+          (ptr t @-> uintptr_t @-> ptr data_type @-> returning void)
+      let capi_copy = foreign ~stub:true (name ^ "_copy") (ptr t @-> ptr t @-> returning void)
+      
+      (* Helper functions *)
+      let make_empty () =
+        let ret = make_new_st State_Owned in capi_new_empty (get_ptr ret); ret
+      let make_empty_null () =
+        let ret = make_new_st State_Owned in
+        let p = get_ptr ret in
+        p |-> fsize <-@ Uintptr.of_int 0;
+        p |-> fdata <-@ from_voidp data_type null;
+        ret
+      let make_uninit n =
+        let ret = make_new_st State_Owned in
+        capi_new_uninitialized (get_ptr ret) (Uintptr.of_int n); ret
+      
+      let duplicate self =
+        let p = get_ptr_const self in
+        let cop = make_new_st State_Owned in
+        capi_copy (get_ptr cop) p;
+        cop
+      
+      let of_array a =
+        let ret = make_uninit (Array.length a) in
+        Array.iteri (fun i v -> !@ ((get_ptr ret) |-> fdata) +@ i <-@ V.grab_ownership v) a;
+        ret
+      let of_list l = of_array (Array.of_list l)
+      
+      let get_size self =
+        Uintptr.to_int (!@ ((get_ptr_const self) |-> fsize))
+      let get_element_unsafe self i =
+        V.to_dependent
+          (!@ ((!@ ((get_ptr self) |-> fdata)) +@ i))
+          ((fun () -> get_state self), (fun newstate -> update_state self newstate))
+      let get_element self i =
+        if (i < 0) || (i >= get_size self) then
+          raise (Invalid_argument "index out of bounds")
+        else get_element_unsafe self i
+      let get_element_const_unsafe self i =
+        V.to_dependent
+          (!@ ((!@ ((get_ptr_const self) |-> fdata)) +@ i))
+          ((fun () -> max_state_const (get_state self)), (fun newstate -> update_state self newstate))
+      let get_element_const self i =
+        if (i < 0) || (i >= get_size self) then
+          raise (Invalid_argument "index out of bounds")
+        else get_element_const_unsafe self i
+      let set_element_unsafe self i v =
+        (!@ ((get_ptr self) |-> fdata)) +@ i <-@ V.grab_ownership v
+      let set_element self i v =
+        if (i < 0) || (i >= get_size self) then
+          raise (Invalid_argument "index out of bounds")
+        else set_element_unsafe self i v
+      
+      let get_named_element self n =
+        let sz = get_size self in
+        let rec inner i =
+          if i >= sz then None
+          else
+            let elt = get_element self i in
+            if Name.to_string (get_name (elt)) = n then Some elt
+            else inner (i + 1)
+        in inner 0
+    end
   end
   
   include Wasi_
@@ -1866,6 +2001,9 @@ module Wasi = struct
     let capi_get_imports =
       foreign ~stub:true "wasi_get_imports"
         (ptr Store.t @-> ptr t @-> ptr Module.t @-> ptr Extern.Vec.t @-> returning bool)
+    let capi_get_unordered_imports =
+      foreign ~stub:true "wasi_get_unordered_imports"
+        (ptr t @-> ptr Module.t @-> ptr NamedExtern.Vec.t @-> returning bool)
     
     (* Ownership status is assumed, as there are no wasi_config_delete *)
     let new_ store config = make_from_raise
@@ -1879,6 +2017,13 @@ module Wasi = struct
         (get_ptr env)
         (Module.get_ptr_const module_)
         (Extern.Vec.get_ptr ret) then Some ret
+      else None
+    let get_unordered_imports env module_ =
+      let ret = NamedExtern.Vec.make_new () in
+      if capi_get_unordered_imports
+        (get_ptr env)
+        (Module.get_ptr_const module_)
+        (NamedExtern.Vec.get_ptr ret) then Some ret
       else None
   end
 end;;
