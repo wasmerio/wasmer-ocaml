@@ -258,5 +258,5 @@ clean:
 	$(RM) $(TESTS) $(EXAMPLES)
 
 install:
-	-$(SILENCER)$(OCAMLFIND) remove wasmer
-	$(SILENCER)$(OCAMLFIND) install wasmer META lib/Wasmer.cmi lib/Wasmer.cmi lib/Wasmer__Util.cmi lib/Wasmer.a lib/Wasmer.cma lib/Wasmer.cmxa lib/Wasmer.cmxs	
+	$(SILENCER)if $(OCAMLFIND) query wasmer -qo -qe; then $(OCAMLFIND) remove wasmer; fi
+	$(SILENCER)$(OCAMLFIND) install wasmer META lib/Wasmer.cmi lib/Wasmer.a lib/Wasmer.cma lib/Wasmer.cmxa lib/Wasmer.cmxs
