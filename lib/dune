@@ -1,0 +1,7 @@
+(library
+ (name wasmer)
+ (libraries ctypes)
+ (foreign_stubs
+  (language c)
+  (names wasmerBindings)
+  (flags :standard)))
