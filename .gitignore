@@ -5,8 +5,11 @@
 /obj/examples/*
 /lib/*
 
-# Test executables
+## Test executables
 /test/*/*
+
+## Documentation
+/html_out/
 
 # Development files
 .gdb_history
