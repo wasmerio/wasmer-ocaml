@@ -212,12 +212,20 @@ module DeclareVec(U: VectorType) : sig
   (** [get_element vec i] gets the [i]th element of [vec] with the correct
       {!const:WasmerBindings.object_state.Dependent} ownership state. *)
   val get_element_unsafe: s -> int -> U.owning_struct
-  val get_element_const: s -> int -> U.owning_struct
-  (** [get_element vec i] gets the [i]th element of [vec] with the correct
+  (** [get_element_const_unsafe vec i] gets the [i]th element of [vec] with the correct
+      {!const:WasmerBindings.object_state.Dependent} ownership state. *)
+      val get_element_const: s -> int -> U.owning_struct
+  (** [get_element_const vec i] gets the [i]th element of [vec] with the correct
       {!const:WasmerBindings.object_state.Dependent} ownership state. *)
   val get_element_const_unsafe: s -> int -> U.owning_struct
+  (** [get_element_const_unsafe vec i] gets the [i]th element of [vec] with the correct
+      {!const:WasmerBindings.object_state.Dependent} ownership state. *)
   val set_element: s -> int -> U.owning_struct -> unit
   val set_element_unsafe: s -> int -> U.owning_struct -> unit
+  val iter: s -> (U.owning_struct -> unit) -> unit
+  val iter_const: s -> (U.owning_struct -> unit) -> unit
+  val map: s -> (U.owning_struct -> 'a) -> 'a list
+  val map_const: s -> (U.owning_struct -> 'a) -> 'a list
 end;;
 (** The vector type, declared in the C API with the [WASM_DECLARE_VEC] macro.
     Vectors always get ownership of their data. *)
@@ -540,6 +548,8 @@ module Val : sig
     
     val is_compatible: s -> Valtype.Vec.s -> bool
   end
+  (** Val vectors **don't** get ownership of their elements when creating from
+      a list or an array *)
 end;;
 
 
@@ -597,7 +607,7 @@ module Module : sig
   val new_unsafe: Store.s -> Byte.Vec.s -> s
   
   val imports: s -> Importtype.Vec.s -> unit
-  val exports: s -> Importtype.Vec.s -> unit
+  val exports: s -> Exporttype.Vec.s -> unit
   
   val serialize: s -> Byte.Vec.s -> unit
   val deserialize: Store.s -> Byte.Vec.s -> s
@@ -685,6 +695,11 @@ module Memory : sig
   val get_data: s -> int -> int -> bytes
   val set_data: s -> int -> int -> bytes -> unit
   
+  val get_i8: s -> int -> int
+  val get_i16: s -> int -> int
+  val get_i32: s -> int -> int32
+  val get_i64: s -> int -> int64
+  
   val size: s -> int
   val grow: s -> int -> bool
 end;;
@@ -737,10 +752,10 @@ val frame_instance: Frame.s -> Instance.s;;
 
 module Wasi : sig
   (* Enabled only if WASMER_WASI_ENABLED was defined at the C API library compile time *)
-  module Config_T : sig
+  module WasiConfig_T : sig
     val name: string
   end
-  module Config : sig
+  module WasiConfig : sig
     val name: string
     
     type t
@@ -835,6 +850,10 @@ module Wasi : sig
       val get_element_const_unsafe: s -> int -> V.owning_struct
       val set_element: s -> int -> V.owning_struct -> unit
       val set_element_unsafe: s -> int -> V.owning_struct -> unit
+      val iter: s -> (V.owning_struct -> unit) -> unit
+      val iter_const: s -> (V.owning_struct -> unit) -> unit
+      val map: s -> (V.owning_struct -> 'a) -> 'a list
+      val map_const: s -> (V.owning_struct -> 'a) -> 'a list
       
       val get_named_element: s -> string -> V.owning_struct option
     end
@@ -850,19 +869,41 @@ module Wasi : sig
     val t: t structure typ
     include module type of struct include Env_ end
     
-    val new_: Store.s -> Config.s -> s
-    val new_unsafe: Store.s -> Config.s -> s
-    val get_imports: Store.s -> s -> Module.s -> Extern.Vec.s option
+    val new_: Store.s -> WasiConfig.s -> s
+    val new_unsafe: Store.s -> WasiConfig.s -> s
+    val get_imports: s -> Module.s -> Extern.Vec.s option
+    (** Orders the imports available in the environment to be in the correct
+        order for loading the module. *)
     val get_unordered_imports: s -> Module.s -> NamedExtern.Vec.s option
   end
 end;;
 
 (** @canonical Wasmer.Util *)
 module Util : sig
-  val wat2wasm: string -> Byte.Vec.s -> unit;;
-  val wasm_of_wat: string -> Byte.Vec.s;;
+  val wat2wasm: string -> Byte.Vec.s -> unit
+  val wasm_of_wat: string -> Byte.Vec.s
   
-  val (%->): Valkind.ocaml list -> Valkind.ocaml list -> Functype.s;;
+  val (%->): Valkind.ocaml list -> Valkind.ocaml list -> Functype.s
   
-  val load_wasm_file: string -> Byte.Vec.s;;
+  val load_wasm_file: string -> Byte.Vec.s
+  
+  val get_export_of_name: Module.s -> Instance.s -> string -> Extern.s option
+  val get_export_of_name_const: Module.s -> Instance.s -> string -> Extern.s option
+  
+  val retrieve_last_error: unit -> string
+  
+  (* open Wasi
+  type importsBuilder_t
+  type importsBuilder_t2
+  class importsBuilder : object
+    method getlist: importsBuilder_t
+    method getdef: importsBuilder_t2
+    
+    method add: string -> string -> Extern.s -> unit
+    method add_default: string -> (string -> Extern.s -> Extern.s) -> unit
+    method extend: importsBuilder -> unit
+    method remove: string -> string -> unit
+    method get: string -> string -> Extern.s option
+    method to_exports: Env.s -> Module.s -> Extern.Vec.s
+  end *)
 end

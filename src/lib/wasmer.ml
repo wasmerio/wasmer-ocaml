@@ -1,8 +1,9 @@
 open Ctypes;;
 open Foreign;;
 
-let () =
-  foreign "assertions" (void @-> returning void) ();;
+(** A tail recursive version of List.map *)
+let map_by_rev_fold f l =
+  List.fold_left (fun acc v -> (f v) :: acc) [] (List.rev l);;
 
 exception Returned_null of string;;
 exception Invalid_access of string;;
@@ -89,9 +90,11 @@ module OWNABLE_OBJECT(O: ObjectType) = struct
   end
 end;;
 
+(* let id = ref 0;; *)
 module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
   type s = { p: O.t ptr; mutable state: object_state; d: O.d option }
   
+  (* let curid = !id let () = incr id *)
   let delete self = match self.state with
     | State_Dependent _ -> () (* The object doesn't own this *)
     | State_Owned -> O.delete self.p; self.state <- State_PassedAway
@@ -124,26 +127,32 @@ module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
         invalid_arg "update_state does not increase ownership"
       else self.state <- st
     | State_PassedAway ->
-      if st = State_PassedAway then self.state <- st
+      if st = State_PassedAway then ()
       else invalid_arg "update_state does not increase ownership"
   
   let get_state { state; _ } = state
   let lose_ownership self = self.state <- State_PassedAway
   let grab_ownership self = match self.state with
     | State_Owned -> self.state <- State_PassedAway; self.p
-    | State_RW -> raise (Invalid_access "grab_ownership { state = State_RW }")
-    | State_Const -> raise (Invalid_access "grab_ownership { state = State_Const }")
+    | State_RW ->
+      raise (Invalid_access "grab_ownership { state = State_RW }")
+      (* raise (Invalid_access ((string_of_int curid) ^ ": grab_ownership { state = State_RW }")) *)
+    | State_Const ->
+      raise (Invalid_access "grab_ownership { state = State_Const }")
+      (* raise (Invalid_access ((string_of_int curid) ^ ": grab_ownership { state = State_Const }")) *)
     | State_PassedAway ->
       raise (Invalid_access "grab_ownership { state = State_PassedAway }")
-    | State_Dependent (_, up) -> (* TODO: what shold be done here? *)
+      (* raise (Invalid_access ((string_of_int curid) ^ ": grab_ownership { state = State_PassedAway }")) *)
+    | State_Dependent (_, up) -> (* TODO: what should be done here? *)
       (* FIXME: if this is dependent on a vector, the vector never gets deleted
-         since one element makes it completely given away.
+         since taking one element makes it completely given away.
          Furthermore, no special check is made to ensure that the real state is
          not PassedAway. *)
       up State_PassedAway; self.p
   let gain_ownership_back self = match self.state with
       | State_Dependent _ ->
         raise (Invalid_access "gain_ownership_back { state = State_Dependent }")
+        (* raise (Invalid_access ((string_of_int curid) ^ ": gain_ownership_back { state = State_Dependent }")) *)
       | State_Owned -> O.delete self.p; self.p
       | _ -> self.state <- State_Owned; self.p
   
@@ -151,8 +160,12 @@ module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
   let get_ptr { p; state; _ } = match get_real_state state with
     | State_Owned -> p
     | State_RW -> p
-    | State_Const -> raise (Invalid_access "get_ptr { state = ..State_Const }")
-    | State_PassedAway -> raise (Invalid_access "get_ptr { state = ..State_PassedAway }")
+    | State_Const ->
+      raise (Invalid_access "get_ptr { state = ..State_Const }")
+      (* raise (Invalid_access ((string_of_int curid) ^ ": get_ptr { state = ..State_Const }")) *)
+    | State_PassedAway ->
+      raise (Invalid_access "get_ptr { state = ..State_PassedAway }")
+      (* raise (Invalid_access ((string_of_int curid) ^ ": get_ptr { state = ..State_PassedAway }")) *)
     | State_Dependent _ -> failwith "unreachable (real_state = Dependent)"
   let get_ptr_const { p; state; _ } = match get_real_state state with
     | State_Owned -> p
@@ -160,15 +173,19 @@ module OwnableObject(O: ObjectType) : OWNABLE_OBJECT(O).T = struct
     | State_Const -> p
     | State_PassedAway ->
       raise (Invalid_access "get_ptr_const { state = ..State_PassedAway }")
+      (* raise (Invalid_access ((string_of_int curid) ^ ": get_ptr_const { state = ..State_PassedAway }")) *)
     | State_Dependent _ -> failwith "unreachable (real_state = Dependent)"
   let get_ptr_givenaway { p; state; _ } = match get_real_state state with
     | State_PassedAway -> p
     | State_Owned ->
       raise (Invalid_access "get_ptr_givenaway { state = ..State_Owned }")
+      (* raise (Invalid_access ((string_of_int curid) ^ ": get_ptr_givenaway { state = ..State_Owned }")) *)
     | State_RW ->
       raise (Invalid_access "get_ptr_givenaway { state = ..State_RW }")
+      (* raise (Invalid_access ((string_of_int curid) ^ ": get_ptr_givenaway { state = ..State_RW }")) *)
     | State_Const ->
       raise (Invalid_access "get_ptr_givenaway { state = ..State_Const }")
+      (* raise (Invalid_access ((string_of_int curid) ^ ": get_ptr_givenaway { state = ..State_Const }")) *)
     | State_Dependent _ -> failwith "unreachable (real_state = Dependent)"
 end;;
 
@@ -198,6 +215,7 @@ module DeclareOwn(T: StructType) : DECLARE_OWN(T).T = struct
     let delete = foreign ~stub:true (name ^ "_delete") (ptr t @-> returning void)
   end
   include OwnableObject(O)
+  (* let () = print_endline ("<module " ^ (string_of_int curid) ^ "> is " ^ name) *)
 end;;
 
 module DECLARE_VEC(U: VectorType) = struct
@@ -232,6 +250,10 @@ module DECLARE_VEC(U: VectorType) = struct
     val get_element_const_unsafe: s -> int -> U.owning_struct
     val set_element: s -> int -> U.owning_struct -> unit
     val set_element_unsafe: s -> int -> U.owning_struct -> unit
+    val iter: s -> (U.owning_struct -> unit) -> unit
+    val iter_const: s -> (U.owning_struct -> unit) -> unit
+    val map: s -> (U.owning_struct -> 'a) -> 'a list
+    val map_const: s -> (U.owning_struct -> 'a) -> 'a list
   end
 end;;
 
@@ -256,6 +278,7 @@ module DeclareVec(T: VectorType) : DECLARE_VEC(T).T = struct
     let delete = foreign ~stub:true (name ^ "_delete") (ptr t @-> returning void)
   end
   include OwnableObject(O)
+  (* let () = print_endline ("<module " ^ (string_of_int curid) ^ "> is " ^ name) *)
   
   let capi_new_empty = foreign ~stub:true (name ^ "_new_empty") (ptr t @-> returning void)
   let capi_new_uninitialized =
@@ -312,6 +335,20 @@ module DeclareVec(T: VectorType) : DECLARE_VEC(T).T = struct
     if (i < 0) || (i >= get_size self) then
       raise (Invalid_argument "index out of bounds")
     else set_element_unsafe self i v
+  
+  let iter self f = for i = 0 to (get_size self) - 1 do f (get_element self i) done
+  let iter_const self f =
+    for i = 0 to (get_size self) - 1 do f (get_element_const self i) done
+  let map self f =
+    let rec inner i acc =
+      if i < 0 then acc
+      else inner (i - 1) ((f (get_element self i)) :: acc)
+    in inner ((get_size self) - 1) []
+  let map_const self f =
+    let rec inner i acc =
+      if i < 0 then acc
+      else inner (i - 1) ((f (get_element_const self i)) :: acc)
+    in inner ((get_size self) - 1) []
 end;;
 
 module DECLARE_TYPE(T: StructType) = struct
@@ -465,6 +502,7 @@ module Wasi_ = struct
   end
   module Env_ = struct
     include OwnableObject(Env_O_)
+    (* let () = print_endline ("<module " ^ (string_of_int curid) ^ "> is Wasi_.Env_") *)
   end
 end;;
 
@@ -483,8 +521,8 @@ module Byte = struct
   module Vec = struct
     include DeclareVec(V)
     
-    let of_char_list l = of_list (List.map (fun i -> Unsigned.UInt8.of_int (Char.code i)) l)
-    let of_int_list l = of_list (List.map (fun i -> Unsigned.UInt8.of_int i) l)
+    let of_char_list l = of_list (map_by_rev_fold (fun i -> Unsigned.UInt8.of_int (Char.code i)) l)
+    let of_int_list l = of_list (map_by_rev_fold (fun i -> Unsigned.UInt8.of_int i) l)
     let of_bytes b = of_char_list (List.of_seq (Bytes.to_seq b))
     let to_char_list self =
       List.init (get_size self)
@@ -1001,6 +1039,7 @@ module Val = struct
     let delete = foreign ~stub:true "wasm_val_delete" (ptr t @-> returning void)
   end
   include OwnableObject(O)
+  (* let () = print_endline ("<module " ^ (string_of_int curid) ^ "> is wasm_val") *)
   
   let of_i32 i32 =
     let ret = make t in
@@ -1112,7 +1151,7 @@ module Val = struct
     let name = "val"
     
     type owning_struct = s
-    let grab_ownership s = !@ (grab_ownership s)
+    let grab_ownership s = !@ (get_ptr_const s)
     let to_dependent v f = make_from_unsafe (addr v) (State_Dependent f)
   end
   module Vec = struct
@@ -1294,7 +1333,7 @@ module Module = struct
   let capi_exports =
     foreign ~stub:true
       "wasm_module_exports"
-      (ptr t @-> ptr Importtype.Vec.t @-> returning void)
+      (ptr t @-> ptr Exporttype.Vec.t @-> returning void)
   
   let capi_serialize =
     foreign ~stub:true
@@ -1317,7 +1356,7 @@ module Module = struct
   let imports self other =
     capi_imports (get_ptr_const self) (Importtype.Vec.gain_ownership_back other)
   let exports self other =
-    capi_exports (get_ptr_const self) (Importtype.Vec.gain_ownership_back other)
+    capi_exports (get_ptr_const self) (Exporttype.Vec.gain_ownership_back other)
   
   let serialize self other =
     capi_serialize (get_ptr_const self) (Byte.Vec.gain_ownership_back other)
@@ -1588,7 +1627,7 @@ module Memory = struct
   let data_size self = Unsigned.Size_t.to_int (capi_data_size (get_ptr_const self))
   let get_data self offset size =
     if offset < 0 then invalid_arg "Offset is negative"
-    else if offset + size > page_size * (data_size self) then
+    else if offset + size > data_size self then
       invalid_arg "Offset + size is too big"
     else
       let dat = (data self) +@ offset in
@@ -1600,6 +1639,19 @@ module Memory = struct
     else
       let dat = (data self) +@ offset in
       Bytes.iteri (fun i c -> (dat +@ i) <-@ Unsigned.UInt8.of_int (Char.code c)) newdata
+  
+  let get_i8 self offset =
+    let dat = get_data self offset 1 in
+    Bytes.get_int8 dat 0
+  let get_i16 self offset =
+    let dat = get_data self offset 2 in
+    Bytes.get_int16_le dat 0
+  let get_i32 self offset =
+    let dat = get_data self offset 4 in
+    Bytes.get_int32_le dat 0
+  let get_i64 self offset =
+    let dat = get_data self offset 8 in
+    Bytes.get_int64_le dat 0
   
   let size self = Unsigned.UInt32.to_int (capi_size (get_ptr_const self))
   let grow self delta = capi_grow (get_ptr self) (Unsigned.UInt32.of_int delta)
@@ -1824,10 +1876,10 @@ let frame_instance f =
 
 module Wasi = struct
   (* Enabled only if WASMER_WASI_ENABLED was defined at the C API library compile time *)
-  module Config_T = struct
+  module WasiConfig_T = struct
     let name = "config"
   end
-  module Config = struct
+  module WasiConfig = struct
     let name = "wasi_config"
     
     type t
@@ -1843,6 +1895,7 @@ module Wasi = struct
         (* TODO: panic? (There is no wasi_config_delete) *) ()
     end
     include OwnableObject(O)
+    (* let () = print_endline ("<module " ^ (string_of_int curid) ^ "> is " ^ name) *)
     
     let capi_new = foreign ~stub:true "wasi_config_new" (string @-> returning (ptr t))
     let new_ name = make_from_raise (capi_new name) State_Owned
@@ -1870,6 +1923,7 @@ module Wasi = struct
         (* TODO: panic? (There is no wasi_named_extern_delete) *) ()
     end
     include OwnableObject(O)
+    (* let () = print_endline ("<module " ^ (string_of_int curid) ^ "> is " ^ name) *)
     
     let capi_module =
       foreign ~stub:true (name ^ "_module") (ptr t @-> returning (ptr Name.t))
@@ -1915,6 +1969,7 @@ module Wasi = struct
           foreign ~stub:true "wasmer_named_extern_vec_delete" (ptr t @-> returning void)
       end
       include OwnableObject(O)
+      (* let () = print_endline ("<module " ^ (string_of_int curid) ^ "> is " ^ name) *)
       
       let capi_new_empty = foreign ~stub:true (name ^ "_new_empty") (ptr t @-> returning void)
       let capi_new_uninitialized = foreign ~stub:true (name ^ "_new_uninitialized")
@@ -1973,6 +2028,20 @@ module Wasi = struct
           raise (Invalid_argument "index out of bounds")
         else set_element_unsafe self i v
       
+      let iter self f = for i = 0 to (get_size self) - 1 do f (get_element self i) done
+      let iter_const self f =
+        for i = 0 to (get_size self) - 1 do f (get_element_const self i) done
+      let map self f =
+        let rec inner i acc =
+          if i < 0 then acc
+          else inner (i - 1) ((f (get_element self i)) :: acc)
+        in inner ((get_size self) - 1) []
+      let map_const self f =
+        let rec inner i acc =
+          if i < 0 then acc
+          else inner (i - 1) ((f (get_element_const self i)) :: acc)
+        in inner ((get_size self) - 1) []
+      
       let get_named_element self n =
         let sz = get_size self in
         let rec inner i =
@@ -1997,34 +2066,41 @@ module Wasi = struct
     
     let capi_new =
       foreign ~stub:true "wasi_env_new"
-        (ptr Store.t @-> ptr Config.t @-> returning (ptr t))
+        (ptr Store.t @-> ptr WasiConfig.t @-> returning (ptr t))
     let capi_get_imports =
       foreign ~stub:true "wasi_get_imports"
         (ptr Store.t @-> ptr t @-> ptr Module.t @-> ptr Extern.Vec.t @-> returning bool)
     let capi_get_unordered_imports =
       foreign ~stub:true "wasi_get_unordered_imports"
         (ptr t @-> ptr Module.t @-> ptr NamedExtern.Vec.t @-> returning bool)
+    let capi_initialize_instance =
+      foreign ~stub:true "wasi_env_initialize_instance"
+        (ptr t @-> ptr Store.t @-> ptr Instance.t @-> returning bool)
     
     (* Ownership status is assumed, as there are no wasi_config_delete *)
     let new_ store config = make_from_raise
-      (capi_new (Store.get_ptr store) (Config.grab_ownership config)) State_Owned
+      (capi_new (Store.get_ptr store) (WasiConfig.grab_ownership config)) State_Owned
     let new_unsafe store config = make_from_unsafe
-      (capi_new (Store.get_ptr store) (Config.grab_ownership config)) State_Owned
-    let get_imports store env module_ =
-      let ret = Extern.Vec.make_new () in
+      (capi_new (Store.get_ptr store) (WasiConfig.grab_ownership config)) State_Owned
+    let get_imports env module_ =
+      let ret = Extern.Vec.make_new_st State_Owned in
       if capi_get_imports
-        (Store.get_ptr_const store)
+        (from_voidp Store.t null) (* Wasmer internals: wasi_get_imports ignores the store parameter*)
         (get_ptr env)
         (Module.get_ptr_const module_)
         (Extern.Vec.get_ptr ret) then Some ret
       else None
+    (* Wasmer internals: wasi_get_unordered_imports returns the imports in the correct order *)
     let get_unordered_imports env module_ =
-      let ret = NamedExtern.Vec.make_new () in
+      let ret = NamedExtern.Vec.make_new_st State_Owned in
       if capi_get_unordered_imports
         (get_ptr env)
         (Module.get_ptr_const module_)
         (NamedExtern.Vec.get_ptr ret) then Some ret
       else None
+    let initialize_instance env store instance =
+      capi_initialize_instance
+        (get_ptr env) (Store.get_ptr store) (Instance.get_ptr instance)
   end
 end;;
 
@@ -2055,4 +2131,90 @@ module Util = struct
     with e ->
       close_in_noerr f;
       raise e;;
+  
+  let get_export_of_name module_ instance name =
+    let expt = Exporttype.Vec.make_new () in Module.exports module_ expt;
+    let expv = Extern.Vec.make_new () in Instance.exports instance expv;
+    let expl = Exporttype.Vec.get_size expt in
+    let rec inner i =
+      if expl <= i then None
+      else
+        let expn = Exporttype.name (Exporttype.Vec.get_element_const expt i) in
+        if Message.to_string expn = name then Some (Extern.Vec.get_element expv i)
+        else inner (i + 1)
+    in inner 0
+  let get_export_of_name_const module_ instance name =
+    let expt = Exporttype.Vec.make_new () in Module.exports module_ expt;
+    let expv = Extern.Vec.make_new () in Instance.exports instance expv;
+    let expl = Exporttype.Vec.get_size expt in
+    let rec inner i =
+      if expl <= i then None
+      else
+        let expn = Exporttype.name (Exporttype.Vec.get_element_const expt i) in
+        if Message.to_string expn = name then Some (Extern.Vec.get_element_const expv i)
+        else inner (i + 1)
+    in inner 0
+  
+  let retrieve_last_error =
+    let capi_len = foreign ~stub:true "wasmer_last_error_length" (void @-> returning int) in
+    let capi_msg = foreign ~stub:true "wasmer_last_error_message"
+      (ptr char @-> int @-> returning int) in fun () ->
+        let len = capi_len () in
+        let buf = allocate_n char ~count:len in
+        ignore (capi_msg buf len); (* FIXME: do not ignore the error value *)
+        string_from_ptr buf ~length:len
+  
+  (* open Wasi
+  type importsBuilder_t = (string, (string, Extern.s) Hashtbl.t) Hashtbl.t
+  type importsBuilder_t2 = (string, string -> Extern.s -> Extern.s) Hashtbl.t
+  class importsBuilder = object (self)
+    val importslist = Hashtbl.create 1 (* Dummy value *)
+    method getlist: importsBuilder_t = importslist
+    
+    val defmap = Hashtbl.create 1
+    method getdef: importsBuilder_t2 = defmap
+    method add_default modname factory = Hashtbl.replace defmap modname factory
+    
+    method add (modname: string) (importname: string) (import: Extern.s) =
+      match Hashtbl.find_opt importslist modname with
+      | None ->
+        let hash = Hashtbl.create 7 in
+        Hashtbl.add hash importname import;
+        Hashtbl.add importslist modname hash
+      | Some hash ->
+        Hashtbl.replace hash importname import
+    
+    method extend (other: importsBuilder) =
+      Hashtbl.iter (fun n h -> match Hashtbl.find_opt importslist n with
+      | None -> Hashtbl.add importslist n (Hashtbl.copy h)
+      | Some selfh -> Hashtbl.iter (Hashtbl.replace selfh) h
+      ) other#getlist
+    
+    method remove modname importname =
+      match Hashtbl.find_opt importslist modname with
+      | None -> ()
+      | Some hash ->
+        Hashtbl.remove hash importname;
+        if Hashtbl.length hash = 0 then Hashtbl.remove importslist modname
+    
+    method get modname importname =
+      Option.bind
+        (Hashtbl.find_opt importslist modname)
+        (fun h -> Hashtbl.find_opt h importname)
+    
+    method to_exports env module_ = match Env.get_unordered_imports env module_ with
+      | None -> raise (Returned_null "Cannot get imports from environment and module")
+      | Some imps -> Extern.Vec.of_list (NamedExtern.Vec.map_const imps (fun named ->
+        let modname = Message.to_string (NamedExtern.get_module named) in
+        let importname = Message.to_string (NamedExtern.get_name named) in
+        match self#get
+          modname
+          importname with
+        | Some ret -> ret
+        | None -> match Hashtbl.find_opt defmap modname with
+          | Some f -> f importname (NamedExtern.get_unwrap named)
+          | None -> invalid_arg ("Missing import: " ^
+              modname ^ " " ^
+              importname)))
+  end *)
 end

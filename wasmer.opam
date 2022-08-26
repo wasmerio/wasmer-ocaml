@@ -20,6 +20,6 @@ depends: [
 	"libwasmer"
 ]
 build: [make "all"]
-run-tests: [make "check"]
-build-env: [[ECHO = "true"]]
+run-test: [make "check"]
+build-env: [ECHO = "true"]
 install: [make "install"]

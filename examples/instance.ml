@@ -101,8 +101,7 @@ let () =
   if Func.is_null one_lsl_f then
     (print_endline "> Error getting 1<<!"; failwith "Invalid module!");
   
-  let arg = Val.of_i32 3l in
-  let args = Val.Vec.of_list [arg] in
+  let args = Val.(Vec.of_list [of_i32 3l]) in
   let results = Val.Vec.make_uninit 1 in
   
   match Func.call mul_two_f args results with

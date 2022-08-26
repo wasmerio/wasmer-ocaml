@@ -52,8 +52,7 @@ let () =
     (print_endline "> Error instanciating the module!"; failwith "Invalid module!");
   
   print_endline "Calling the `add_one` function...";
-  let arg = Val.of_i32 1l in
-  let args = Val.Vec.of_list [arg] in
+  let args = Val.(Vec.of_list [of_i32 1l]) in
   let results = Val.Vec.make_uninit 1 in
   
   match Func.call add_one_f args results with
