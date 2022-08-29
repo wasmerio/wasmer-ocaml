@@ -1,36 +1,3 @@
-# Output files
-## OCaml
-/obj/lib/*
-/obj/test/*/*
-/obj/examples/*
-/lib/*
-
-## Test executables
-/test/*/*
-
-## Documentation
-/html_out/
-
-# Development files
-.gdb_history
-.vscode
-
-# Tree
-!.gitkeep
-
-# Examples
-/examples/*
-!/examples/*.ml
-!/examples/*.wat
-!/examples/*.wasm
-!/examples/rust-wasm/
-/examples/rust-wasm/*
-!/examples/rust-wasm/Cargo.toml
-!/examples/rust-wasm/src/
-!/examples/rust-wasm/target/
-/examples/rust-wasm/target/*
-!/examples/rust-wasm/target/wasm32-unknown-unknown/
-/examples/rust-wasm/target/wasm32-unknown-unknown/*
-!/examples/rust-wasm/target/wasm32-unknown-unknown/release/
-/examples/rust-wasm/target/wasm32-unknown-unknown/release/*
-!/examples/rust-wasm/target/wasm32-unknown-unknown/release/rust_integration.wasm
+_build/
+/_opam/
+/.vscode/
