@@ -1,8 +1,6 @@
 open Ctypes
 open Foreign
 
-let () = foreign "assertions" (void @-> returning void) ()
-
 exception Returned_null of string
 exception Invalid_access of string
 
@@ -322,6 +320,7 @@ module DeclareVec (T : VectorType) : DECLARE_VEC(T).T = struct
       (name ^ "_new_uninitialized")
       (ptr t @-> size_t @-> returning void)
 
+  (* Unused *)
   let capi_new =
     foreign ~stub:true (name ^ "_new")
       (ptr t @-> size_t @-> ptr data_type @-> returning void)
@@ -2432,6 +2431,7 @@ module Wasi = struct
           (name ^ "_new_uninitialized")
           (ptr t @-> uintptr_t @-> returning void)
 
+      (* Unused *)
       let capi_new =
         foreign ~stub:true (name ^ "_new")
           (ptr t @-> uintptr_t @-> ptr data_type @-> returning void)

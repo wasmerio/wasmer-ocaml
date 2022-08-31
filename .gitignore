@@ -1,3 +1,20 @@
+# Examples
+## Rust
+/examples/rust-wasm/*
+!/examples/rust-wasm/Cargo.toml
+!/examples/rust-wasm/src/
+!/examples/rust-wasm/target/
+/examples/rust-wasm/target/*
+!/examples/rust-wasm/target/wasm32-unknown-unknown/
+/examples/rust-wasm/target/wasm32-unknown-unknown/*
+!/examples/rust-wasm/target/wasm32-unknown-unknown/release/
+/examples/rust-wasm/target/wasm32-unknown-unknown/release/*
+!/examples/rust-wasm/target/wasm32-unknown-unknown/release/rust_integration.wasm
+
+# Other files
+## Dune output
 _build/
-/_opam/
+## VS Code
 /.vscode/
+
+/_opam/

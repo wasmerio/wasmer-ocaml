@@ -1,3 +1,4 @@
 (test
  (name instance)
- (libraries wasmer))
+ (libraries wasmer)
+ (flags -w -33))

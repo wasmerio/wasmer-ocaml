@@ -1,4 +1,5 @@
-(executable
- (name hello)
- (public_name hello)
- (libraries wasmer))
+(executables
+ (names hello instance rust)
+ (public_names - - -)
+ (libraries wasmer)
+ (flags -w -33))

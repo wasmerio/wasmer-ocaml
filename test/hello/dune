@@ -1,3 +1,4 @@
 (test
  (name hello)
- (libraries wasmer))
+ (libraries wasmer)
+ (flags -w -27-33))

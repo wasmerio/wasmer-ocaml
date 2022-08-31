@@ -1,7 +1,6 @@
 (library
  (name wasmer)
- (libraries ctypes)
- (foreign_stubs
-  (language c)
-  (names wasmerBindings)
-  (flags :standard)))
+ (public_name wasmer)
+ (libraries ctypes ctypes.foreign)
+ (library_flags ("-cclib" "-Wl,-rpath=%{ocaml-config:standard_library}/../libwasmer" "-cclib" "%{ocaml-config:standard_library}/../libwasmer/libwasmer%{ocaml-config:ext_dll}"))
+ (flags -w -27-32))

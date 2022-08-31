@@ -4,28 +4,15 @@ This is the (official) OCaml bindings for Wasmer.
 
 # Usage
 
-## Compiling
+## Compiling, installing and checking
 
-To compile the library, simply run `make`. An OCaml library
-(`Wasmer.cmxa`) will be generated in the `lib` folder.
-A bytecode archive (`.cma`) and a dynamically-linkable library will also be
-generated.
+To compile the library, simply run `dune build` (to build) or `opam install .`
+(to install). There are also integrated tests.
 
-The Wasmer C API library (`libwasmer.so`) must also be accessible by the
-linker and all executables.
+In case you are building it using Dune, you also need to install the
+`libwasmer` Opam package.
 
-If you want to use the static library, you must compile using
-`make CFLAGS=-DWASM_IMPORT_ALL`, which will generate huge file sizes (all
-symbols will be embedded in the executables).
+# Documentation
 
-## Checking
-
-To check the library against the provided tests, run `make check`.
-
-Note: using the static Wasmer library will not work, unless you have built the
-library with `make CFLAGS=-DWASM_IMPORT_ALL`.
-
-## Running
-
-To run, you need to have the Wasmer C API available for the linker to get.
-The library is entirely available in the `lib` folder after compiling.
+The documentation is incomplete. To build it, the preferred (tested) method is
+running `make doc`.
