@@ -15,7 +15,6 @@ depends: [
   "dune" {>= "2.0"}
   "ctypes"
   "ctypes-foreign"
-  "libwasmer"
 ]
 build: [
   ["dune" "subst"] {dev}

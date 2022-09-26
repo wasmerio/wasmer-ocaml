@@ -1,4 +1,5 @@
 (test
  (name hello)
  (libraries wasmer)
- (flags -w -27-33))
+ (flags -w -27-33)
+ (deps hello.wasm))
