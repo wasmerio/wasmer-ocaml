@@ -2,13 +2,17 @@ open Ctypes
 open Wasmer
 open Wasmer.Util
 
+(* The file isn't necessarily copied over, so it is now embedded in this file *)
+let raw_data = "\x00asm\x01\x00\x00\x00\x01\x84\x80\x80\x80\x00\x01\x60\x00\x00\x02\x8a\x80\x80\x80\x00\x01\x00\x05hello\x00\x00\x03\x82\x80\x80\x80\x00\x01\x00\x07\x87\x80\x80\x80\x00\x01\x03run\x00\x01\x0a\x8a\x80\x80\x80\x00\x01\x84\x80\x80\x80\x00\x00\x10\x00\x0b"
+
 let hello_callback store args results =
   print_endline "Calling back...";
   print_endline "> Hello world!";
   None
 
 let () =
-  let wasm = load_wasm_file "hello.wasm" in
+  (* let wasm = load_wasm_file "hello.wasm" in *)
+  let wasm = Byte.Vec.of_bytes (Bytes.of_string raw_data) in
 
   let engine = Engine.new_ () in
   let store = Store.new_ engine in
